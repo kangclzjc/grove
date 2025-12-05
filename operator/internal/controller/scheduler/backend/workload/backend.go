@@ -303,13 +303,10 @@ func workloadGVK() schema.GroupVersionKind {
 	}
 }
 
-// init registers the Workload backend for pod mutation
+// init registers the Workload backend factory
 func init() {
-	// Register this backend for pod mutation
-	// Create a singleton instance for mutation (doesn't need client)
-	mutatorBackend := &Backend{}
-	if err := backend.RegisterBackendForMutation("default-scheduler", mutatorBackend); err != nil {
-		panic(fmt.Sprintf("failed to register Workload backend for mutation: %v", err))
-	}
-	backend.SetDefaultBackendForMutation(mutatorBackend)
+	// Register factory for default-scheduler
+	backend.RegisterBackendFactory("default-scheduler", func(cl client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder) backend.SchedulerBackend {
+		return New(cl, scheme, eventRecorder)
+	})
 }

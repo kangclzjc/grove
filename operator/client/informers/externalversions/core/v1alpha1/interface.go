@@ -32,8 +32,6 @@ type Interface interface {
 	PodCliqueScalingGroups() PodCliqueScalingGroupInformer
 	// PodCliqueSets returns a PodCliqueSetInformer.
 	PodCliqueSets() PodCliqueSetInformer
-	// Workloads returns a WorkloadInformer.
-	Workloads() WorkloadInformer
 }
 
 type version struct {
@@ -65,9 +63,4 @@ func (v *version) PodCliqueScalingGroups() PodCliqueScalingGroupInformer {
 // PodCliqueSets returns a PodCliqueSetInformer.
 func (v *version) PodCliqueSets() PodCliqueSetInformer {
 	return &podCliqueSetInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
-}
-
-// Workloads returns a WorkloadInformer.
-func (v *version) Workloads() WorkloadInformer {
-	return &workloadInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

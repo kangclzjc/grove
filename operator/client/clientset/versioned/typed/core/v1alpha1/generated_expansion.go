@@ -25,5 +25,3 @@ type PodCliqueExpansion interface{}
 type PodCliqueScalingGroupExpansion interface{}
 
 type PodCliqueSetExpansion interface{}
-
-type WorkloadExpansion interface{}

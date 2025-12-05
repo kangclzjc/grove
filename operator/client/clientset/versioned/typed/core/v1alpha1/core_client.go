@@ -32,7 +32,6 @@ type GroveV1alpha1Interface interface {
 	PodCliquesGetter
 	PodCliqueScalingGroupsGetter
 	PodCliqueSetsGetter
-	WorkloadsGetter
 }
 
 // GroveV1alpha1Client is used to interact with features provided by the grove.io group.
@@ -54,10 +53,6 @@ func (c *GroveV1alpha1Client) PodCliqueScalingGroups(namespace string) PodClique
 
 func (c *GroveV1alpha1Client) PodCliqueSets(namespace string) PodCliqueSetInterface {
 	return newPodCliqueSets(c, namespace)
-}
-
-func (c *GroveV1alpha1Client) Workloads(namespace string) WorkloadInterface {
-	return newWorkloads(c, namespace)
 }
 
 // NewForConfig creates a new GroveV1alpha1Client for the given config.

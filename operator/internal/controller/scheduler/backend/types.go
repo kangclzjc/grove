@@ -19,13 +19,10 @@ package backend
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	groveschedulerv1alpha1 "github.com/ai-dynamo/grove/scheduler/api/core/v1alpha1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -80,51 +77,22 @@ type SchedulerBackend interface {
 	ShouldRemoveSchedulingGate(ctx context.Context, logger logr.Logger, pod *corev1.Pod, podClique client.Object) (bool, string, error)
 }
 
-// BackendFactory creates scheduler backends
-type BackendFactory interface {
-	// CreateBackend creates a new backend instance
-	CreateBackend(client client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder) (SchedulerBackend, error)
-}
-
-// Global registry for scheduler backends (by scheduler name)
-// This allows pod component to find the right backend to mutate pods
-var (
-	backendMutatorRegistry = make(map[string]SchedulerBackend)
-	backendMutatorMu       sync.RWMutex
-	defaultBackend         SchedulerBackend
-)
-
-// RegisterBackendForMutation registers a backend for pod mutation by scheduler name
-// This should be called by each backend's init() function
-func RegisterBackendForMutation(schedulerName string, backend SchedulerBackend) error {
-	backendMutatorMu.Lock()
-	defer backendMutatorMu.Unlock()
-
-	if schedulerName == "" {
-		return fmt.Errorf("scheduler name cannot be empty")
-	}
-
-	if _, exists := backendMutatorRegistry[schedulerName]; exists {
-		return fmt.Errorf("backend for scheduler %s already registered", schedulerName)
-	}
-
-	backendMutatorRegistry[schedulerName] = backend
-	return nil
-}
-
-// SetDefaultBackendForMutation sets the default backend for empty scheduler names
-func SetDefaultBackendForMutation(backend SchedulerBackend) {
-	backendMutatorMu.Lock()
-	defer backendMutatorMu.Unlock()
-	defaultBackend = backend
-}
+// Note: The global backend registry has been replaced by BackendManager
+// See manager.go for the new singleton pattern implementation
+// BackendFactory is now defined in manager.go as a function type
 
 // MutatePod applies scheduler-specific mutations to a Pod
 // This is the main entry point for the pod component
 func MutatePod(pod *corev1.Pod, gangName string, podGroupName string) error {
-	backend, err := getBackendForScheduler(pod.Spec.SchedulerName)
+	// Get backend from global manager
+	manager, err := GetGlobalManager()
 	if err != nil {
-		return err
+		return fmt.Errorf("backend manager not initialized: %w", err)
+	}
+
+	backend, err := manager.GetBackend(pod.Spec.SchedulerName)
+	if err != nil {
+		return fmt.Errorf("failed to get backend for scheduler %s: %w", pod.Spec.SchedulerName, err)
 	}
 
 	// Apply scheduling gate
@@ -134,35 +102,6 @@ func MutatePod(pod *corev1.Pod, gangName string, podGroupName string) error {
 
 	// Apply backend-specific mutations
 	return backend.MutatePodSpec(pod, gangName, podGroupName)
-}
-
-// getBackendForScheduler returns the appropriate backend for the given scheduler name
-func getBackendForScheduler(schedulerName string) (SchedulerBackend, error) {
-	backendMutatorMu.RLock()
-	defer backendMutatorMu.RUnlock()
-
-	// Normalize empty scheduler name to "default-scheduler"
-	if schedulerName == "" {
-		schedulerName = "default-scheduler"
-	}
-
-	// Try exact match first
-	if backend, exists := backendMutatorRegistry[schedulerName]; exists {
-		return backend, nil
-	}
-
-	// Use default backend if set
-	if defaultBackend != nil {
-		return defaultBackend, nil
-	}
-
-	return nil, fmt.Errorf("no backend registered for scheduler %s", schedulerName)
-}
-
-// GetBackendForScheduler returns the backend instance for the given scheduler name (exported)
-// This allows other components (like pod component) to access backends for gate removal logic
-func GetBackendForScheduler(schedulerName string) (SchedulerBackend, error) {
-	return getBackendForScheduler(schedulerName)
 }
 
 // PodGangInfo contains the information needed to create a gang scheduling resource

@@ -77,16 +77,14 @@ func New(cl client.Client, scheme *runtime.Scheme, eventRecorder record.EventRec
 	}
 }
 
-// init registers the KAI backend
+// init registers the KAI backend factory
 func init() {
-	// Register this backend for pod mutation
-	mutatorBackend := &Backend{}
-	if err := backend.RegisterBackendForMutation("kai-scheduler", mutatorBackend); err != nil {
-		panic(fmt.Sprintf("failed to register KAI backend for mutation: %v", err))
+	// Register factory for kai-scheduler and grove-scheduler
+	factory := func(cl client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder) backend.SchedulerBackend {
+		return New(cl, scheme, eventRecorder)
 	}
-	if err := backend.RegisterBackendForMutation("grove-scheduler", mutatorBackend); err != nil {
-		panic(fmt.Sprintf("failed to register Grove backend for mutation: %v", err))
-	}
+	backend.RegisterBackendFactory("kai-scheduler", factory)
+	backend.RegisterBackendFactory("grove-scheduler", factory)
 }
 
 // Name returns the backend name

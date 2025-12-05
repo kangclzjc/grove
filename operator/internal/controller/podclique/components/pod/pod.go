@@ -27,8 +27,6 @@ import (
 	"github.com/ai-dynamo/grove/operator/internal/controller/common/component"
 	componentutils "github.com/ai-dynamo/grove/operator/internal/controller/common/component/utils"
 	"github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend"
-	kaibackend "github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend/kai"
-	workloadbackend "github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend/workload"
 	groveerr "github.com/ai-dynamo/grove/operator/internal/errors"
 	"github.com/ai-dynamo/grove/operator/internal/expect"
 	"github.com/ai-dynamo/grove/operator/internal/utils"
@@ -76,56 +74,16 @@ type _resource struct {
 	scheme            *runtime.Scheme
 	eventRecorder     record.EventRecorder
 	expectationsStore *expect.ExpectationsStore
-	// Cache for scheduler backends (schedulerName -> backend instance)
-	// Lazily initialized to avoid creating backends for unused schedulers
-	schedulerBackendCache map[string]backend.SchedulerBackend
 }
 
 // New creates a new Pod operator for managing Pod resources within PodCliques
 func New(client client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder, expectationsStore *expect.ExpectationsStore) component.Operator[grovecorev1alpha1.PodClique] {
 	return &_resource{
-		client:                client,
-		scheme:                scheme,
-		eventRecorder:         eventRecorder,
-		expectationsStore:     expectationsStore,
-		schedulerBackendCache: make(map[string]backend.SchedulerBackend),
+		client:            client,
+		scheme:            scheme,
+		eventRecorder:     eventRecorder,
+		expectationsStore: expectationsStore,
 	}
-}
-
-// getOrCreateSchedulerBackend returns a cached backend instance for the given scheduler,
-// or creates a new one if it doesn't exist. This ensures we only create one backend per scheduler.
-// Note: uses value receiver because map is a reference type, modifications to map contents work with value receiver.
-func (r _resource) getOrCreateSchedulerBackend(schedulerName string) (backend.SchedulerBackend, error) {
-	// Normalize empty scheduler name
-	if schedulerName == "" {
-		schedulerName = "default-scheduler"
-	}
-
-	// Check cache first
-	if cached, exists := r.schedulerBackendCache[schedulerName]; exists {
-		return cached, nil
-	}
-
-	// Create new backend based on scheduler name
-	var schedBackend backend.SchedulerBackend
-
-	switch schedulerName {
-	case "default-scheduler":
-		schedBackend = workloadbackend.New(r.client, r.scheme, r.eventRecorder)
-	case "kai-scheduler", "grove-scheduler":
-		schedBackend = kaibackend.New(r.client, r.scheme, r.eventRecorder)
-	default:
-		// Try to get registered backend as fallback
-		var err error
-		schedBackend, err = backend.GetBackendForScheduler(schedulerName)
-		if err != nil {
-			return nil, fmt.Errorf("no backend registered for scheduler %s", schedulerName)
-		}
-	}
-
-	// Cache for future use
-	r.schedulerBackendCache[schedulerName] = schedBackend
-	return schedBackend, nil
 }
 
 // GetExistingResourceNames returns the names of all the existing pods for the given PodClique.

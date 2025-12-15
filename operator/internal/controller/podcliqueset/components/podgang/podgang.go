@@ -161,14 +161,14 @@ func getLabels(pcs *grovecorev1alpha1.PodCliqueSet) map[string]string {
 		map[string]string{
 			apicommon.LabelComponentKey: apicommon.LabelComponentNamePodGang,
 		})
-	
+
 	// Add scheduler-backend label so Backend Controllers can identify which PodGang to handle
 	// Check scheduler name from the first clique (all cliques should have same scheduler)
 	schedulerName := ""
 	if len(pcs.Spec.Template.Cliques) > 0 {
 		schedulerName = pcs.Spec.Template.Cliques[0].Spec.PodSpec.SchedulerName
 	}
-	
+
 	// Determine backend based on schedulerName
 	if schedulerName == "" || schedulerName == "default-scheduler" {
 		// Use Workload backend for default kube-scheduler
@@ -177,6 +177,6 @@ func getLabels(pcs *grovecorev1alpha1.PodCliqueSet) map[string]string {
 		// Use KAI backend for custom schedulers
 		labels[apicommon.LabelSchedulerBackend] = "kai"
 	}
-	
+
 	return labels
 }

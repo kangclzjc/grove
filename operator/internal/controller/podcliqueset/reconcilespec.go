@@ -212,7 +212,7 @@ func getOrderedKindsForSync(pcs *grovecorev1alpha1.PodCliqueSet) []component.Kin
 		component.KindPodClique,
 		component.KindPodCliqueScalingGroup,
 	}
-	
+
 	// NEW ARCHITECTURE: Always create PodGang as the unified intermediate representation
 	// Backend Controllers will convert PodGang to scheduler-specific CRs (Workload/PodGroup)
 	return append(baseKinds, component.KindPodGang)

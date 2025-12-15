@@ -23,11 +23,10 @@ import (
 	"github.com/ai-dynamo/grove/operator/internal/controller/podcliqueset"
 	"github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend"
 	backendcontroller "github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend/controller"
-	"github.com/go-logr/logr"
 
+	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	// Import backend packages to trigger their init() functions which register factories
 	_ "github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend/kai"
 	_ "github.com/ai-dynamo/grove/operator/internal/controller/scheduler/backend/workload"
 )

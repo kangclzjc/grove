@@ -192,13 +192,38 @@ func (b *Backend) ShouldRemoveSchedulingGate(ctx context.Context, logger logr.Lo
 		return false, "", fmt.Errorf("expected PodClique object, got %T", podCliqueObj)
 	}
 
+	// NEW REQUIREMENT: Check if PodGang has Initialized=True condition
+	// This ensures all pods are created before gates are removed
+	podGangName := pod.Labels[common.LabelPodGang]
+	if podGangName == "" {
+		return false, "pod missing podgang label", nil
+	}
+
+	podGang := &groveschedulerv1alpha1.PodGang{}
+	podGangKey := client.ObjectKey{Name: podGangName, Namespace: pod.Namespace}
+	if err := b.client.Get(ctx, podGangKey, podGang); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.V(1).Info("PodGang not found yet", "podGangName", podGangName)
+			return false, "podgang not found", nil
+		}
+		return false, "", fmt.Errorf("failed to get PodGang %v: %w", podGangKey, err)
+	}
+
+	// Check if PodGang has Initialized condition set to True
+	if !isPodGangInitialized(podGang) {
+		logger.V(1).Info("PodGang not initialized yet, waiting for all pods to be created",
+			"podGangName", podGangName,
+			"pod", pod.Name)
+		return false, "podgang not initialized", nil
+	}
+
 	// Check if this PodClique has a base PodGang dependency
 	basePodGangName, hasBasePodGangLabel := podClique.GetLabels()[common.LabelBasePodGang]
 	if !hasBasePodGangLabel {
-		// This is a base PodGang pod - remove gate immediately
+		// This is a base PodGang pod - remove gate immediately (if initialized)
 		logger.Info("Proceeding with gate removal for base PodGang pod",
 			"podObjectKey", client.ObjectKeyFromObject(pod))
-		return true, "base podgang pod", nil
+		return true, "base podgang pod and initialized", nil
 	}
 
 	// This is a scaled PodGang pod - check if base PodGang is scheduled
@@ -237,6 +262,33 @@ func (b *Backend) ShouldRemoveSchedulingGate(ctx context.Context, logger logr.Lo
 		"podObjectKey", client.ObjectKeyFromObject(pod),
 		"basePodGangName", basePodGangName)
 	return true, "base podgang ready", nil
+}
+
+// isPodGangInitialized checks if PodGang has Initialized condition set to True.
+func isPodGangInitialized(podGang *groveschedulerv1alpha1.PodGang) bool {
+	// First check if Initialized condition is True
+	hasInitializedCondition := false
+	for _, cond := range podGang.Status.Conditions {
+		if cond.Type == string(groveschedulerv1alpha1.PodGangConditionTypeInitialized) &&
+			cond.Status == metav1.ConditionTrue {
+			hasInitializedCondition = true
+			break
+		}
+	}
+
+	if !hasInitializedCondition {
+		return false
+	}
+
+	// Also verify that all PodGroups have enough podReferences to meet minReplicas
+	// This ensures pods don't get scheduled if we don't have enough members for gang scheduling
+	for _, pg := range podGang.Spec.PodGroups {
+		if int32(len(pg.PodReferences)) < pg.MinReplicas {
+			return false
+		}
+	}
+
+	return true
 }
 
 // MutatePodSpec mutates the Pod spec to add KAI-specific requirements
@@ -304,7 +356,7 @@ kind: %s`,
 	for _, pg := range podGang.Spec.PodGroups {
 		totalMinMember += pg.MinReplicas
 	}
-	spec["minMember"] = totalMinMember
+	spec["minMember"] = int64(totalMinMember) // Convert int32 to int64 for unstructured
 
 	// Add priority class name if present
 	if podGang.Spec.PriorityClassName != "" {
@@ -319,7 +371,7 @@ kind: %s`,
 	for _, pg := range podGang.Spec.PodGroups {
 		subGroup := map[string]interface{}{
 			"name":      pg.Name,
-			"minMember": pg.MinReplicas,
+			"minMember": int64(pg.MinReplicas), // Convert int32 to int64 for unstructured
 		}
 		subGroups = append(subGroups, subGroup)
 	}

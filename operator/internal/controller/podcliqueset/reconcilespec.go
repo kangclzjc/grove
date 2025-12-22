@@ -199,9 +199,8 @@ func (r *Reconciler) recordIncompleteReconcile(ctx context.Context, logger logr.
 }
 
 // getOrderedKindsForSync returns the ordered list of component kinds to synchronize.
-// It dynamically selects between PodGang and Workload based on the scheduler type.
 func getOrderedKindsForSync(pcs *grovecorev1alpha1.PodCliqueSet) []component.Kind {
-	baseKinds := []component.Kind{
+	return []component.Kind{
 		component.KindServiceAccount,
 		component.KindRole,
 		component.KindRoleBinding,
@@ -209,11 +208,8 @@ func getOrderedKindsForSync(pcs *grovecorev1alpha1.PodCliqueSet) []component.Kin
 		component.KindHeadlessService,
 		component.KindHorizontalPodAutoscaler,
 		component.KindPodCliqueSetReplica,
-		component.KindPodClique,
-		component.KindPodCliqueScalingGroup,
+		component.KindPodClique,             // Create PodClique (which creates Pods)
+		component.KindPodCliqueScalingGroup, // Create PCSG
+		component.KindPodGang,               // Create/Update PodGang (handles both initial creation and updating with pod references)
 	}
-	
-	// NEW ARCHITECTURE: Always create PodGang as the unified intermediate representation
-	// Backend Controllers will convert PodGang to scheduler-specific CRs (Workload/PodGroup)
-	return append(baseKinds, component.KindPodGang)
 }

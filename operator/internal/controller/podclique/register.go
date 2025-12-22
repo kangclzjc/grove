@@ -18,7 +18,6 @@ package podclique
 
 import (
 	"context"
-	"strings"
 
 	"github.com/ai-dynamo/grove/operator/api/common/constants"
 	grovecorev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
@@ -31,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha1 "k8s.io/api/scheduling/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -251,11 +251,8 @@ func mapPodGangToPCLQs() handler.MapFunc {
 		}
 		requests := make([]reconcile.Request, 0, len(podGang.Spec.PodGroups))
 		for _, podGroup := range podGang.Spec.PodGroups {
-			if len(podGroup.PodReferences) == 0 {
-				continue
-			}
-			podRefName := podGroup.PodReferences[0].Name
-			pclqFQN := extractPCLQNameFromPodName(podRefName)
+			// The PodGroup name is the PodClique FQN
+			pclqFQN := podGroup.Name
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: pclqFQN, Namespace: podGang.Namespace},
 			})
@@ -264,20 +261,63 @@ func mapPodGangToPCLQs() handler.MapFunc {
 	}
 }
 
-// extractPCLQNameFromPodName extracts the PodClique name from a Pod name by removing the replica index suffix
-func extractPCLQNameFromPodName(podName string) string {
-	endIndex := strings.LastIndex(podName, "-")
-	return podName[:endIndex]
-}
-
-// podGangPredicate allows all PodGang create and update events to trigger PodClique reconciliation
+// podGangPredicate filters PodGang events to only trigger when Initialized=True
 func podGangPredicate() predicate.Predicate {
 	return predicate.Funcs{
-		CreateFunc:  func(_ event.CreateEvent) bool { return true },
-		DeleteFunc:  func(_ event.DeleteEvent) bool { return false },
-		UpdateFunc:  func(_ event.UpdateEvent) bool { return true },
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Only trigger if PodGang is created with Initialized=True (unlikely but possible)
+			initialized := isPodGangInitialized(e.Object)
+			if initialized {
+				ctrl.Log.V(1).Info("PodGang created with Initialized=True, triggering PodClique reconcile",
+					"podGang", client.ObjectKeyFromObject(e.Object))
+			}
+			return initialized
+		},
+		DeleteFunc: func(_ event.DeleteEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			// Only trigger when PodGang transitions to Initialized=True
+			oldInitialized := isPodGangInitialized(e.ObjectOld)
+			newInitialized := isPodGangInitialized(e.ObjectNew)
+			transitioned := !oldInitialized && newInitialized
+			if transitioned {
+				ctrl.Log.Info("PodGang transitioned to Initialized=True, triggering PodClique reconcile to remove scheduling gates",
+					"podGang", client.ObjectKeyFromObject(e.ObjectNew))
+			}
+			return transitioned
+		},
 		GenericFunc: func(_ event.GenericEvent) bool { return false },
 	}
+}
+
+// isPodGangInitialized checks if a PodGang has Initialized condition set to True.
+func isPodGangInitialized(obj client.Object) bool {
+	podGang, ok := obj.(*groveschedulerv1alpha1.PodGang)
+	if !ok {
+		return false
+	}
+
+	// First check if Initialized condition is True
+	hasInitializedCondition := false
+	for _, cond := range podGang.Status.Conditions {
+		if cond.Type == string(groveschedulerv1alpha1.PodGangConditionTypeInitialized) &&
+			cond.Status == metav1.ConditionTrue {
+			hasInitializedCondition = true
+			break
+		}
+	}
+
+	if !hasInitializedCondition {
+		return false
+	}
+
+	// Also verify that all PodGroups have enough podReferences to meet minReplicas
+	for _, pg := range podGang.Spec.PodGroups {
+		if int32(len(pg.PodReferences)) < pg.MinReplicas {
+			return false
+		}
+	}
+
+	return true
 }
 
 // mapWorkloadToPCLQs maps a Workload to one or more reconcile.Request(s) for its constituent PodClique's.

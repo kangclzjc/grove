@@ -86,6 +86,9 @@ func MutatePod(pod *corev1.Pod, gangName string, podGroupName string) error {
 		return fmt.Errorf("backend not initialized")
 	}
 
+	// Set the scheduler name from global configuration
+	pod.Spec.SchedulerName = GetSchedulerName()
+
 	// Apply scheduling gate
 	pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{
 		{Name: backend.GetSchedulingGateName()},

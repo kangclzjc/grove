@@ -9,6 +9,7 @@ rules:
   - scheduler.grove.io
   resources:
   - podgangs
+  - podgangs/status
   verbs:
   - create
   - get
@@ -22,6 +23,19 @@ rules:
   - scheduling.k8s.io
   resources:
   - workloads
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - scheduling.run.ai
+  resources:
+  - podgroups
   verbs:
   - create
   - get

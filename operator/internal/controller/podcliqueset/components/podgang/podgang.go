@@ -119,7 +119,7 @@ func (r _resource) Delete(ctx context.Context, logger logr.Logger, pcsObjectMeta
 // NEW FLOW: PodGang is created BEFORE Pods with empty podReferences.
 // After Pods are created, updatePodGangWithPodReferences() will populate the references and set Initialized=True.
 func (r _resource) buildResource(pcs *grovecorev1alpha1.PodCliqueSet, pgInfo podGangInfo, pg *groveschedulerv1alpha1.PodGang) error {
-	pg.Labels = getLabels(pcs)
+	pg.Labels = getLabels(pcs.Name)
 	if err := controllerutil.SetControllerReference(pcs, pg, r.scheme); err != nil {
 		return groveerr.WrapError(
 			err,
@@ -170,31 +170,10 @@ func emptyPodGang(objKey client.ObjectKey) *groveschedulerv1alpha1.PodGang {
 }
 
 // getLabels constructs labels for a PodGang resource.
-func getLabels(pcs *grovecorev1alpha1.PodCliqueSet) map[string]string {
-	labels := lo.Assign(
-		apicommon.GetDefaultLabelsForPodCliqueSetManagedResources(pcs.Name),
+func getLabels(pcsName string) map[string]string {
+	return lo.Assign(
+		apicommon.GetDefaultLabelsForPodCliqueSetManagedResources(pcsName),
 		map[string]string{
 			apicommon.LabelComponentKey: apicommon.LabelComponentNamePodGang,
 		})
-
-	// Add scheduler-backend label so Backend Controllers can identify which PodGang to handle
-	// Check scheduler name from the first clique (all cliques should have same scheduler)
-	schedulerName := ""
-	if len(pcs.Spec.Template.Cliques) > 0 {
-		schedulerName = pcs.Spec.Template.Cliques[0].Spec.PodSpec.SchedulerName
-	}
-
-	// Determine backend based on schedulerName
-	// Default to "kai" backend (kai-scheduler or grove-scheduler)
-	if schedulerName == "" || schedulerName == "kai-scheduler" || schedulerName == "grove-scheduler" {
-		labels[apicommon.LabelSchedulerBackend] = "kai"
-	} else if schedulerName == "default-scheduler" || schedulerName == "kube-scheduler" {
-		// Use kube backend for default kube-scheduler (not implemented yet)
-		labels[apicommon.LabelSchedulerBackend] = "kube"
-	} else {
-		// For any other scheduler, default to kai
-		labels[apicommon.LabelSchedulerBackend] = "kai"
-	}
-
-	return labels
 }

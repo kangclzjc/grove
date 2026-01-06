@@ -25,13 +25,12 @@ import (
 	"github.com/ai-dynamo/grove/operator/internal/controller/podcliqueset"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend"
 	backendcontroller "github.com/ai-dynamo/grove/operator/internal/schedulerbackend/controller"
-	"github.com/go-logr/logr"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // RegisterControllers registers all controllers with the manager.
-func RegisterControllers(mgr ctrl.Manager, logger logr.Logger, config configv1alpha1.OperatorConfiguration) error {
+func RegisterControllers(mgr ctrl.Manager, config configv1alpha1.OperatorConfiguration) error {
 	// Get scheduler name from configuration
 	schedulerName := config.SchedulerName
 	if schedulerName == "" {
@@ -47,8 +46,6 @@ func RegisterControllers(mgr ctrl.Manager, logger logr.Logger, config configv1al
 	); err != nil {
 		return fmt.Errorf("failed to initialize scheduler backend: %w", err)
 	}
-	logger.Info("Initialized scheduler backend", "schedulerName", schedulerName)
-
 	controllerConfig := config.Controllers
 	pcsReconciler := podcliqueset.NewReconciler(mgr, controllerConfig.PodCliqueSet)
 	if err := pcsReconciler.RegisterWithManager(mgr); err != nil {
@@ -64,7 +61,7 @@ func RegisterControllers(mgr ctrl.Manager, logger logr.Logger, config configv1al
 	}
 
 	// Backend controller for PodGang -> scheduler-specific CR conversion
-	backendReconciler, err := backendcontroller.NewReconciler(mgr, logger)
+	backendReconciler, err := backendcontroller.NewReconciler(mgr)
 	if err != nil {
 		return fmt.Errorf("failed to create backend reconciler: %w", err)
 	}

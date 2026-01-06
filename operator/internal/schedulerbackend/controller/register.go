@@ -20,14 +20,13 @@ import (
 	"fmt"
 
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend"
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NewReconciler creates a new BackendReconciler
-func NewReconciler(mgr ctrl.Manager, logger logr.Logger) (*BackendReconciler, error) {
+func NewReconciler(mgr ctrl.Manager) (*BackendReconciler, error) {
 	// Get the configured backend
 	backend := schedulerbackend.Get()
 	if backend == nil {
@@ -38,17 +37,15 @@ func NewReconciler(mgr ctrl.Manager, logger logr.Logger) (*BackendReconciler, er
 		Client:  mgr.GetClient(),
 		Scheme:  mgr.GetScheme(),
 		Backend: backend,
-		Logger:  logger.WithValues("backend", backend.Name()),
 	}, nil
 }
 
 // NewReconcilerWithBackend creates a new BackendReconciler with explicit dependencies
 // Useful for testing
-func NewReconcilerWithBackend(client client.Client, scheme *runtime.Scheme, backend schedulerbackend.SchedulerBackend, logger logr.Logger) *BackendReconciler {
+func NewReconcilerWithBackend(client client.Client, scheme *runtime.Scheme, backend schedulerbackend.SchedulerBackend) *BackendReconciler {
 	return &BackendReconciler{
 		Client:  client,
 		Scheme:  scheme,
 		Backend: backend,
-		Logger:  logger.WithValues("backend", backend.Name()),
 	}
 }

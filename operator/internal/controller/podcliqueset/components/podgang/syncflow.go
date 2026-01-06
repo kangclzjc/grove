@@ -505,23 +505,15 @@ func (r _resource) updatePodGangsWithPodReferences(sc *syncContext) error {
 		)
 	}
 
-	// Get all Pods for this PodCliqueSet
-	podList := &corev1.PodList{}
-	if err := r.client.List(sc.ctx, podList,
-		client.InNamespace(sc.pcs.Namespace),
-		client.MatchingLabels(apicommon.GetDefaultLabelsForPodCliqueSetManagedResources(sc.pcs.Name)),
-	); err != nil {
-		return groveerr.WrapError(err,
-			errCodeListPods,
-			component.OperationSync,
-			fmt.Sprintf("Failed to list Pods for PodCliqueSet: %v", client.ObjectKeyFromObject(sc.pcs)),
-		)
+	podList := make([]corev1.Pod, 0)
+	for _, pods := range sc.pclqPods {
+		podList = append(podList, pods...)
 	}
 
 	// Update each PodGang with its pod references
 	for i := range podGangList.Items {
 		podGang := &podGangList.Items[i]
-		if err := r.updatePodGangWithPodReferences(sc, podGang, podList.Items); err != nil {
+		if err := r.updatePodGangWithPodReferences(sc, podGang, podList); err != nil {
 			// Don't return error immediately, continue updating other PodGangs
 			// Errors like "not all pods created" are expected and will trigger requeue
 			if errors.Is(err, groveerr.New(groveerr.ErrCodeRequeueAfter, component.OperationSync, "")) {

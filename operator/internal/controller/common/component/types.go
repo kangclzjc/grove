@@ -77,8 +77,6 @@ const (
 	KindPodCliqueScalingGroup Kind = "PodCliqueScalingGroup"
 	// KindPodGang indicates that the resource is a PodGang (Grove custom scheduler API).
 	KindPodGang Kind = "PodGang"
-	// KindWorkload indicates that the resource is a Workload (Kubernetes 1.35+ gang scheduling API).
-	KindWorkload Kind = "Workload"
 	// KindPodCliqueSetReplica indicates that the resource is a PodCliqueSet replica.
 	KindPodCliqueSetReplica Kind = "PodCliqueSetReplica"
 )

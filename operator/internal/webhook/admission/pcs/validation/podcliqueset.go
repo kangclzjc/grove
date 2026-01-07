@@ -410,7 +410,7 @@ func (v *pcsValidator) validatePodSpec(spec corev1.PodSpec, fldPath *field.Path)
 	// Prevent users from specifying schedulerName in PodSpec
 	// The operator will set this based on the OperatorConfiguration.SchedulerName
 	if !utils.IsEmptyStringType(spec.SchedulerName) {
-		allErrs = append(allErrs, field.Forbidden(specFldPath.Child("schedulerName"), 
+		allErrs = append(allErrs, field.Forbidden(specFldPath.Child("schedulerName"),
 			"schedulerName must not be set in PodSpec, it is controlled by the operator configuration"))
 	}
 

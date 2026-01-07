@@ -713,29 +713,6 @@ func hasInitializedCondition(pg *groveschedulerv1alpha1.PodGang) bool {
 	return false
 }
 
-// createPodGroupsForPodGang constructs PodGroups from constituent PodCliques.
-func createPodGroupsForPodGang(namespace string, pgInfo podGangInfo) []groveschedulerv1alpha1.PodGroup {
-	podGroups := lo.Map(pgInfo.pclqs, func(pclq pclqInfo, _ int) groveschedulerv1alpha1.PodGroup {
-		namespacedNames := lo.Map(pclq.associatedPodNames, func(associatedPodName string, _ int) groveschedulerv1alpha1.NamespacedName {
-			return groveschedulerv1alpha1.NamespacedName{
-				Namespace: namespace,
-				Name:      associatedPodName,
-			}
-		})
-		// sorting the slice of NamespaceName. This prevents unnecessary updates to the PodGang resource if the only thing
-		// that is difference is the order of NamespaceNames.
-		sort.Slice(namespacedNames, func(i, j int) bool {
-			return namespacedNames[i].Name < namespacedNames[j].Name
-		})
-		return groveschedulerv1alpha1.PodGroup{
-			Name:          pclq.fqn,
-			PodReferences: namespacedNames,
-			MinReplicas:   pclq.minAvailable,
-		}
-	})
-	return podGroups
-}
-
 // Convenience types and methods on these types that are used during sync flow run.
 // ------------------------------------------------------------------------------------------------
 
@@ -796,9 +773,6 @@ func (sc *syncContext) getPodCliques(podGang podGangInfo) []grovecorev1alpha1.Po
 
 // syncFlowResult captures the result of a sync flow run.
 type syncFlowResult struct {
-	// podsGangsPendingCreation are the names of PodGangs that could not be created in this sync run.
-	// It could be due to all PCLQs not present, or it could be due to presence of at least one PCLQ that is not ready.
-	podsGangsPendingCreation []string
 	// createdPodGangNames are the names of the PodGangs that got created during the sync flow run.
 	createdPodGangNames []string
 	// errs are the list of errors during the sync flow run.
@@ -815,19 +789,9 @@ func (sfr *syncFlowResult) recordError(err error) {
 	sfr.errs = append(sfr.errs, err)
 }
 
-// hasPodGangsPendingCreation returns true if any PodGangs are waiting to be created.
-func (sfr *syncFlowResult) hasPodGangsPendingCreation() bool {
-	return len(sfr.podsGangsPendingCreation) > 0
-}
-
 // recordPodGangCreation adds a PodGang to the created list.
 func (sfr *syncFlowResult) recordPodGangCreation(podGangName string) {
 	sfr.createdPodGangNames = append(sfr.createdPodGangNames, podGangName)
-}
-
-// recordPodGangPendingCreation adds a PodGang to the pending creation list.
-func (sfr *syncFlowResult) recordPodGangPendingCreation(podGangName string) {
-	sfr.podsGangsPendingCreation = append(sfr.podsGangsPendingCreation, podGangName)
 }
 
 // getAggregatedError combines all errors into a single error.

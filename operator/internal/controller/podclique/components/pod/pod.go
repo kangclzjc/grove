@@ -167,7 +167,7 @@ func (r _resource) buildResource(pcs *grovecorev1alpha1.PodCliqueSet, pclq *grov
 		return groveerr.WrapError(err,
 			errCodeBuildPodResource,
 			component.OperationSync,
-			fmt.Sprintf("failed to prepare pod spec with scheduler backend"),
+			"failed to prepare pod spec with scheduler backend",
 		)
 	}
 

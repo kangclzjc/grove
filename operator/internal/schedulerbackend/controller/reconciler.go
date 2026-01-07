@@ -91,11 +91,11 @@ func (r *BackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Status-only updates (like Initialized condition) are ignored
 func podGangSpecChangePredicate() predicate.Predicate {
 	return predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
+		CreateFunc: func(_ event.CreateEvent) bool {
 			// Always process creation events
 			return true
 		},
-		DeleteFunc: func(e event.DeleteEvent) bool {
+		DeleteFunc: func(_ event.DeleteEvent) bool {
 			// Process deletion events to clean up backend resources
 			return true
 		},

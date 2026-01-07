@@ -128,9 +128,26 @@ func (r _resource) buildResource(pcs *grovecorev1alpha1.PodCliqueSet, pgInfo pod
 			fmt.Sprintf("failed to set the controller reference on PodGang %s to PodCliqueSet %v", pgInfo.fqn, client.ObjectKeyFromObject(pcs)),
 		)
 	}
+	// Only set PodGroups if they don't exist yet (initial creation)
+	// Once populated, we preserve existing podReferences to avoid clearing them on subsequent reconciles
+	if len(pg.Spec.PodGroups) == 0 {
+		// Create PodGroups with EMPTY podReferences initially
+		pg.Spec.PodGroups = createEmptyPodGroupsForPodGang(pgInfo)
+	} else {
+		// PodGroups already exist - preserve them but update MinReplicas if needed
+		expectedPodGroups := make(map[string]int32)
+		for _, pclq := range pgInfo.pclqs {
+			expectedPodGroups[pclq.fqn] = pclq.minAvailable
+		}
 
-	// Create PodGroups with EMPTY podReferences initially
-	pg.Spec.PodGroups = createEmptyPodGroupsForPodGang(pgInfo)
+		// Update MinReplicas for existing PodGroups
+		for i := range pg.Spec.PodGroups {
+			podGroup := &pg.Spec.PodGroups[i]
+			if expectedMinReplicas, ok := expectedPodGroups[podGroup.Name]; ok {
+				podGroup.MinReplicas = expectedMinReplicas
+			}
+		}
+	}
 	pg.Spec.PriorityClassName = pcs.Spec.Template.PriorityClassName
 
 	// Note: Initialized condition will be set to False via status patch after create

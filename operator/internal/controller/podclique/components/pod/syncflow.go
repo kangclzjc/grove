@@ -307,17 +307,6 @@ func (r _resource) checkAndRemovePodSchedulingGates(sc *syncContext, logger logr
 	return skippedScheduleGatedPods, nil
 }
 
-// isPodGangInitialized checks if PodGang has Initialized condition set to True
-func isPodGangInitialized(podGang *groveschedulerv1alpha1.PodGang) bool {
-	for _, cond := range podGang.Status.Conditions {
-		if cond.Type == string(groveschedulerv1alpha1.PodGangConditionTypeInitialized) &&
-			cond.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
-}
-
 // isBasePodGangScheduled checks if the base PodGang (identified by name) is scheduled, returning errors for API failures.
 // A base PodGang is considered "scheduled" when ALL of its constituent PodCliques have achieved
 // their minimum required number of scheduled pods (PodClique.Status.ScheduledReplicas >= PodGroup.MinReplicas).

@@ -148,7 +148,7 @@ func (r *Reconciler) initRollingUpdateProgress(ctx context.Context, pcs *groveco
 // syncPodCliqueSetResources synchronizes all managed child resources in order.
 func (r *Reconciler) syncPodCliqueSetResources(ctx context.Context, logger logr.Logger, pcs *grovecorev1alpha1.PodCliqueSet) ctrlcommon.ReconcileStepResult {
 	continueReconcileAndRequeueKinds := make([]component.Kind, 0)
-	for _, kind := range getOrderedKindsForSync(pcs) {
+	for _, kind := range getOrderedKindsForSync() {
 		operator, err := r.operatorRegistry.GetOperator(kind)
 		if err != nil {
 			return ctrlcommon.ReconcileWithErrors(fmt.Sprintf("error getting operator for kind: %s", kind), err)
@@ -202,7 +202,7 @@ func (r *Reconciler) recordIncompleteReconcile(ctx context.Context, logger logr.
 }
 
 // getOrderedKindsForSync returns the ordered list of component kinds to synchronize.
-func getOrderedKindsForSync(pcs *grovecorev1alpha1.PodCliqueSet) []component.Kind {
+func getOrderedKindsForSync() []component.Kind {
 	return []component.Kind{
 		component.KindServiceAccount,
 		component.KindRole,

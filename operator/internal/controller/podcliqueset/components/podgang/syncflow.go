@@ -870,9 +870,6 @@ func (sc *syncContext) determinePCSGReplicas(pcsgFQN string, pcsgConfig grovecor
 
 // syncFlowResult captures the result of a sync flow run.
 type syncFlowResult struct {
-	// podsGangsPendingCreation are the names of PodGangs that could not be created in this sync run.
-	// It could be due to all PCLQs not present, or it could be due to presence of at least one PCLQ that is not ready.
-	podsGangsPendingCreation []string
 	// createdPodGangNames are the names of the PodGangs that got created during the sync flow run.
 	createdPodGangNames []string
 	// errs are the list of errors during the sync flow run.
@@ -889,19 +886,9 @@ func (sfr *syncFlowResult) recordError(err error) {
 	sfr.errs = append(sfr.errs, err)
 }
 
-// hasPodGangsPendingCreation returns true if any PodGangs are waiting to be created.
-func (sfr *syncFlowResult) hasPodGangsPendingCreation() bool {
-	return len(sfr.podsGangsPendingCreation) > 0
-}
-
 // recordPodGangCreation adds a PodGang to the created list.
 func (sfr *syncFlowResult) recordPodGangCreation(podGangName string) {
 	sfr.createdPodGangNames = append(sfr.createdPodGangNames, podGangName)
-}
-
-// recordPodGangPendingCreation adds a PodGang to the pending creation list.
-func (sfr *syncFlowResult) recordPodGangPendingCreation(podGangName string) {
-	sfr.podsGangsPendingCreation = append(sfr.podsGangsPendingCreation, podGangName)
 }
 
 // getAggregatedError combines all errors into a single error.

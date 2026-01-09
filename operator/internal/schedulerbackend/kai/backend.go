@@ -30,7 +30,7 @@ import (
 
 const (
 	// BackendName is the name of the KAI backend
-	BackendName = "kai"
+	BackendName = "KAI-Scheduler"
 	// SchedulingGateName is the name of the scheduling gate used by KAI
 	SchedulingGateName = "grove.io/podgang-pending-creation"
 	// BackendLabelValue is the label value to identify KAI backend

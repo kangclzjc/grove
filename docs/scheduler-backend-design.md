@@ -8,7 +8,7 @@ This document describes the scheduler backend framework introduced in PR #293 an
 ## Motivation
 
 - Current Grove behavior: PodGang resources were created after pods were created and associated with the PodGang (pods have back references to PodGang).
-- Problem: Workload API and kube-scheduler backend expect scheduler-specific CR (e.g., Workload) to be present so that kube-scheduler can run reservation/filter/scoring plugins before pod creation. Workload objects reference PodGroups/Pods, and Pods need to reference Workload in their spec.
+- Problem: Workload API and kube-scheduler backend expect scheduler-specific CR (e.g., Workload) to be present so that kube-scheduler can run reservation/filter/scoring plugins before pod creation. Workload need to be create first and Pods need to reference Workload in their spec.
 - Goal: Provide a pluggable backend framework that allows Grove to create PodGang early (with empty PodReferences) and let a scheduler backend create scheduler-specific resources (Workload/PodGroup). Later, when Pods are created / associated, operator populates PodGang podReferences and sets an Initialized condition. Pods should hold scheduling gates until PodGang is Initialized.
 
 ## High-level design
@@ -88,8 +88,6 @@ PreparePod is called right before creating Pod objects to let the backend inject
 
 - Implement kube-scheduler backend (Workload creation & mapping PodGang → Workload) in a follow-up PR.
 - Implement KAI backend SyncPodGang and OnPodGangDelete.
-- Add unit/e2e tests for new flows (timing: PodGang create → backend creation → pod creation → PodGang podRefs update → Initialized transition).
-- Possibly update backend initialization mapping so "grove-scheduler" maps to a bespoke backend rather than kai.New.
 
 ## Review checklist
 
@@ -97,6 +95,5 @@ PreparePod is called right before creating Pod objects to let the backend inject
 - [ ] Validate RBAC includes podgangs/status.
 - [ ] Confirm predicate behavior for backend controller and PodClique controller matches intended triggers.
 - [ ] Confirm the operator does not unintentionally clear existing PodReferences during updates.
-- [ ] Decide mapping policy for schedulerName strings to backend implementations.
 
 ---

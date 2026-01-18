@@ -147,11 +147,11 @@ func (r _resource) buildResource(pcs *grovecorev1alpha1.PodCliqueSet, pgi *podGa
 	// Once populated, we preserve existing podReferences to avoid clearing them on subsequent reconciles
 	if len(pg.Spec.PodGroups) == 0 {
 		// Create PodGroups with EMPTY podReferences initially
-		pg.Spec.PodGroups = createEmptyPodGroupsForPodGang(pgInfo)
+		pg.Spec.PodGroups = createEmptyPodGroupsForPodGang(*pgi)
 	} else {
 		// PodGroups already exist - preserve them but update MinReplicas if needed
 		expectedPodGroups := make(map[string]int32)
-		for _, pclq := range pgInfo.pclqs {
+		for _, pclq := range pgi.pclqs {
 			expectedPodGroups[pclq.fqn] = pclq.minAvailable
 		}
 

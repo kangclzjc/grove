@@ -121,7 +121,6 @@ func (v *pcsValidator) validatePodCliqueTemplates(fldPath *field.Path) ([]string
 
 	cliqueNames := make([]string, 0, len(cliqueTemplateSpecs))
 	cliqueRoles := make([]string, 0, len(cliqueTemplateSpecs))
-	schedulerNames := make([]string, 0, len(cliqueTemplateSpecs))
 	for i, cliqueTemplateSpec := range cliqueTemplateSpecs {
 		warns, errs := v.validatePodCliqueTemplateSpec(cliqueTemplateSpec, fldPath.Index(i), scalingGroupCliqueNames)
 		if len(errs) != 0 {

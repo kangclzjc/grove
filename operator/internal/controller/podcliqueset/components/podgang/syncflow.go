@@ -503,7 +503,7 @@ func (r _resource) updatePodGangsWithPodReferences(sc *syncContext) error {
 // updatePodGangWithPodReferences updates a PodGang with pod references and sets Initialized condition.
 func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
 	// Find the podGangInfo from expectedPodGangs
-	podGangInfo, found := lo.Find(sc.expectedPodGangs, func(pg podGangInfo) bool {
+	podGangInfo, found := lo.Find(sc.expectedPodGangs, func(pg *podGangInfo) bool {
 		return pg.fqn == podGang.Name
 	})
 	if !found {
@@ -518,7 +518,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 	// Use sc.pclqPods to check pod counts against expectedPodGangs metadata
 	allPodsCreated := true
 	for _, pclqInfo := range podGangInfo.pclqs {
-		pods, ok := sc.pclqPods[pclqInfo.fqn]
+		pods, ok := sc.existingPCLQPods[pclqInfo.fqn]
 		if !ok || len(pods) < int(pclqInfo.minAvailable) {
 			allPodsCreated = false
 			sc.logger.Info("Not all pods created yet for PodClique",
@@ -556,7 +556,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 	// We only need to include PodCliques that belong to this PodGang
 	podsByGroup := make(map[string][]corev1.Pod)
 	for _, pclqInfo := range podGangInfo.pclqs {
-		if pods, ok := sc.pclqPods[pclqInfo.fqn]; ok {
+		if pods, ok := sc.existingPCLQPods[pclqInfo.fqn]; ok {
 			podsByGroup[pclqInfo.fqn] = pods
 		}
 	}

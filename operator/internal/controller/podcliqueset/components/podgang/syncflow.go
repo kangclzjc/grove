@@ -513,19 +513,103 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 		return err
 	}
 
-	// Fetch latest PodGang
-	latestPodGang, err := r.fetchLatestPodGang(sc, podGang)
-	if err != nil {
+	// Update pod references using Patch (no need to fetch from API server!)
+	if err := r.patchPodGangWithPodReferences(sc, podGang, podGangInfo); err != nil {
 		return err
 	}
 
-	// Update pod references in PodGang spec
-	if err := r.updatePodGangSpec(sc, latestPodGang, podGangInfo); err != nil {
-		return err
-	}
+	// Update status to set Initialized=True (idempotent - no need to check current state)
+	return r.patchPodGangInitializedStatus(sc, podGang)
+}
 
-	// Update status if this is initial setup
-	return r.updatePodGangStatusIfNeeded(sc, latestPodGang)
+// patchPodGangInitializedStatus sets Initialized condition to True
+func (r _resource) patchPodGangInitializedStatus(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
+	// Create a PodGang object with only the status we want to patch
+	statusPatch := &groveschedulerv1alpha1.PodGang{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podGang.Name,
+			Namespace: sc.pcs.Namespace,
+		},
+	}
+	
+	// Set Initialized condition to True and Phase to Pending
+	setInitializedCondition(statusPatch, metav1.ConditionTrue, "AllPodsCreated", "All pods have been created and references populated")
+	statusPatch.Status.Phase = groveschedulerv1alpha1.PodGangPhasePending
+	
+	// Patch status (idempotent - if already True, no change will be made)
+	if err := r.client.Status().Patch(sc.ctx, statusPatch, client.Merge); err != nil {
+		// Log but don't fail - status update is not critical
+		sc.logger.Error(err, "Failed to patch PodGang status with Initialized condition",
+			"podGang", podGang.Name)
+		return nil // Don't fail the entire operation for status updates
+	}
+	
+	sc.logger.Info("Successfully updated PodGang with pod references and set Initialized=True",
+		"podGang", podGang.Name)
+	return nil
+}
+
+// patchPodGangWithPodReferences uses strategic merge patch to update pod references
+func (r _resource) patchPodGangWithPodReferences(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang, podGangInfo *podGangInfo) error {
+	// Build PodGroups with pod references from syncContext
+	podGroups := r.buildPodGroupsFromContext(sc, podGangInfo)
+	
+	// Create patch object
+	patchPodGang := &groveschedulerv1alpha1.PodGang{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podGang.Name,
+			Namespace: sc.pcs.Namespace,
+		},
+		Spec: groveschedulerv1alpha1.PodGangSpec{
+			PodGroups: podGroups,
+		},
+	}
+	
+	// Apply patch
+	if err := r.client.Patch(sc.ctx, patchPodGang, client.Merge); err != nil {
+		return groveerr.WrapError(err,
+			errCodeCreateOrPatchPodGang,
+			component.OperationSync,
+			fmt.Sprintf("Failed to patch PodGang %s with pod references", podGang.Name),
+		)
+	}
+	
+	sc.logger.Info("Successfully patched PodGang with pod references",
+		"podGang", podGang.Name,
+		"numPodGroups", len(podGroups))
+	return nil
+}
+
+// buildPodGroupsFromContext constructs PodGroups with pod references from syncContext data
+func (r _resource) buildPodGroupsFromContext(sc *syncContext, podGangInfo *podGangInfo) []groveschedulerv1alpha1.PodGroup {
+	podsByGroup := r.groupPodsByPodClique(sc, podGangInfo)
+	
+	podGroups := make([]groveschedulerv1alpha1.PodGroup, 0, len(podGangInfo.pclqs))
+	for _, pclqInfo := range podGangInfo.pclqs {
+		pods := podsByGroup[pclqInfo.fqn]
+		
+		// Build podReferences list
+		podReferences := make([]groveschedulerv1alpha1.NamespacedName, 0, len(pods))
+		for _, pod := range pods {
+			podReferences = append(podReferences, groveschedulerv1alpha1.NamespacedName{
+				Namespace: pod.Namespace,
+				Name:      pod.Name,
+			})
+		}
+		
+		// Sort for consistency
+		sort.Slice(podReferences, func(i, j int) bool {
+			return podReferences[i].Name < podReferences[j].Name
+		})
+		
+		podGroups = append(podGroups, groveschedulerv1alpha1.PodGroup{
+			Name:          pclqInfo.fqn,
+			PodReferences: podReferences,
+			MinReplicas:   pclqInfo.minAvailable,
+		})
+	}
+	
+	return podGroups
 }
 
 // findPodGangInfo locates the podGangInfo from expectedPodGangs
@@ -560,38 +644,6 @@ func (r _resource) verifyAllPodsCreated(sc *syncContext, podGangName string, pod
 	return nil
 }
 
-// fetchLatestPodGang retrieves the most recent version of the PodGang
-func (r _resource) fetchLatestPodGang(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) (*groveschedulerv1alpha1.PodGang, error) {
-	latestPodGang := &groveschedulerv1alpha1.PodGang{}
-	if err := r.client.Get(sc.ctx, client.ObjectKeyFromObject(podGang), latestPodGang); err != nil {
-		return nil, groveerr.WrapError(err,
-			errCodeCreateOrPatchPodGang,
-			component.OperationSync,
-			fmt.Sprintf("Failed to get latest PodGang %s before updating pod references", podGang.Name),
-		)
-	}
-	return latestPodGang, nil
-}
-
-// updatePodGangSpec updates the PodGang spec with pod references
-func (r _resource) updatePodGangSpec(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang, podGangInfo *podGangInfo) error {
-	// Group pods by PodGroup (PodClique name)
-	podsByGroup := r.groupPodsByPodClique(sc, podGangInfo)
-
-	// Update podReferences for all PodGroups
-	r.updatePodReferencesInPodGroups(podGang, podsByGroup)
-
-	// Update PodGang spec
-	if err := r.client.Update(sc.ctx, podGang); err != nil {
-		return groveerr.WrapError(err,
-			errCodeCreateOrPatchPodGang,
-			component.OperationSync,
-			fmt.Sprintf("Failed to update PodGang %s with pod references", podGang.Name),
-		)
-	}
-	return nil
-}
-
 // groupPodsByPodClique organizes pods by their PodClique names
 func (r _resource) groupPodsByPodClique(sc *syncContext, podGangInfo *podGangInfo) map[string][]corev1.Pod {
 	podsByGroup := make(map[string][]corev1.Pod)
@@ -601,76 +653,6 @@ func (r _resource) groupPodsByPodClique(sc *syncContext, podGangInfo *podGangInf
 		}
 	}
 	return podsByGroup
-}
-
-// updatePodReferencesInPodGroups updates podReferences for each PodGroup
-func (r _resource) updatePodReferencesInPodGroups(podGang *groveschedulerv1alpha1.PodGang, podsByGroup map[string][]corev1.Pod) {
-	for i := range podGang.Spec.PodGroups {
-		podGroup := &podGang.Spec.PodGroups[i]
-		pods := podsByGroup[podGroup.Name]
-
-		// Build podReferences list
-		podReferences := make([]groveschedulerv1alpha1.NamespacedName, 0, len(pods))
-		for _, pod := range pods {
-			podReferences = append(podReferences, groveschedulerv1alpha1.NamespacedName{
-				Namespace: pod.Namespace,
-				Name:      pod.Name,
-			})
-		}
-
-		// Sort for consistency
-		sort.Slice(podReferences, func(i, j int) bool {
-			return podReferences[i].Name < podReferences[j].Name
-		})
-
-		podGroup.PodReferences = podReferences
-	}
-}
-
-// updatePodGangStatusIfNeeded updates PodGang status during initial setup
-func (r _resource) updatePodGangStatusIfNeeded(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
-	isInitialSetup := !isInitialized(podGang)
-
-	if !isInitialSetup {
-		sc.logger.Info("Successfully updated PodGang pod references (post-initialization update)",
-			"podGang", podGang.Name)
-		return nil
-	}
-
-	// Re-fetch PodGang to get latest resourceVersion after spec update
-	updatedPodGang := &groveschedulerv1alpha1.PodGang{}
-	if err := r.client.Get(sc.ctx, client.ObjectKeyFromObject(podGang), updatedPodGang); err != nil {
-		return groveerr.WrapError(err,
-			errCodeCreateOrPatchPodGang,
-			component.OperationSync,
-			fmt.Sprintf("Failed to get updated PodGang %s", podGang.Name),
-		)
-	}
-
-	// Update status with Initialized condition and Phase
-	if err := r.setInitializedStatus(sc, updatedPodGang); err != nil {
-		return err
-	}
-
-	sc.logger.Info("Successfully completed initial setup of PodGang with pod references and set Initialized=True",
-		"podGang", podGang.Name)
-	return nil
-}
-
-// setInitializedStatus sets the Initialized condition and Phase on PodGang
-func (r _resource) setInitializedStatus(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
-	original := podGang.DeepCopy()
-	setInitializedCondition(podGang, metav1.ConditionTrue, "AllPodsCreated", "All pods have been created and references populated")
-	podGang.Status.Phase = groveschedulerv1alpha1.PodGangPhasePending
-
-	if err := r.client.Status().Patch(sc.ctx, podGang, client.MergeFrom(original)); err != nil {
-		return groveerr.WrapError(err,
-			errCodeCreateOrPatchPodGang,
-			component.OperationSync,
-			fmt.Sprintf("Failed to update PodGang %s status", podGang.Name),
-		)
-	}
-	return nil
 }
 
 // isInitialized checks if PodGang has Initialized condition set to True

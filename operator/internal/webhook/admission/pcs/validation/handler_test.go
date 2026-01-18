@@ -47,7 +47,7 @@ func TestNewHandler(t *testing.T) {
 		Logger: logr.Discard(),
 	}
 
-	handler := NewHandler(mgr, getDefaultTASConfig(), "kube-scheduler")
+	handler := NewHandler(mgr, getDefaultTASConfig(), "default-scheduler")
 	require.NotNil(t, handler)
 	assert.NotNil(t, handler.logger)
 }
@@ -244,7 +244,7 @@ func TestValidateUpdate(t *testing.T) {
 				Logger: logr.Discard(),
 			}
 
-			handler := NewHandler(mgr, getDefaultTASConfig(), "kube-scheduler")
+			handler := NewHandler(mgr, getDefaultTASConfig(), "default-scheduler")
 
 			ctx := context.Background()
 			warnings, err := handler.ValidateUpdate(ctx, tt.newObj, tt.oldObj)
@@ -271,7 +271,7 @@ func TestValidateDelete(t *testing.T) {
 		Logger: logr.Discard(),
 	}
 
-	handler := NewHandler(mgr, getDefaultTASConfig(), "kube-scheduler")
+	handler := NewHandler(mgr, getDefaultTASConfig(), "default-scheduler")
 
 	// Deletion validation always succeeds
 	ctx := context.Background()
@@ -382,7 +382,7 @@ func TestLogValidatorFunctionInvocation(t *testing.T) {
 				Logger: logr.Discard(),
 			}
 
-			handler := NewHandler(mgr, getDefaultTASConfig(), "kube-scheduler")
+			handler := NewHandler(mgr, getDefaultTASConfig(), "default-scheduler")
 
 			// This function doesn't return an error, but we can verify it doesn't panic
 			assert.NotPanics(t, func() {

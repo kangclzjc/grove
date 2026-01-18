@@ -44,7 +44,7 @@ func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder reco
 	initOnce.Do(func() {
 		// Default to "kai-scheduler" if not specified
 		if schedulerName == "" {
-			schedulerName = "kube-scheduler"
+			schedulerName = "default-scheduler"
 		}
 
 		// Create the appropriate backend based on scheduler name
@@ -52,7 +52,7 @@ func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder reco
 		case "kai-scheduler":
 			globalBackend = kai.New(client, scheme, eventRecorder, schedulerName)
 
-		case "kube-scheduler":
+		case "default-scheduler":
 			globalBackend = kube.New(client, scheme, eventRecorder, schedulerName)
 
 		// Future backends - uncomment and implement as needed:

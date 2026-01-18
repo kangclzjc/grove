@@ -49,8 +49,9 @@ type SchedulerBackend interface {
 	PreparePod(pod *corev1.Pod)
 }
 
-// PreparePod prepares a Pod for scheduling by applying backend-specific configurations.
-// This is the main entry point for pod preparation before creation.
+// PreparePod adds scheduler backend specific configuration to the given Pod object
+// prior to its creation. This includes setting schedulerName, scheduling gates,
+// annotations, etc.
 func PreparePod(pod *corev1.Pod) error {
 	// Get backend instance
 	backend := Get()

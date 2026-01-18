@@ -543,7 +543,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 	latestPodGang := &groveschedulerv1alpha1.PodGang{}
 	if err := r.client.Get(sc.ctx, client.ObjectKeyFromObject(podGang), latestPodGang); err != nil {
 		return groveerr.WrapError(err,
-			errCodeUpdatePodGang,
+			errCodeCreateOrPatchPodGang,
 			component.OperationSync,
 			fmt.Sprintf("Failed to get latest PodGang %s before updating pod references", podGang.Name),
 		)
@@ -586,7 +586,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 	// Update PodGang spec with the latest podReferences
 	if err := r.client.Update(sc.ctx, latestPodGang); err != nil {
 		return groveerr.WrapError(err,
-			errCodeUpdatePodGang,
+			errCodeCreateOrPatchPodGang,
 			component.OperationSync,
 			fmt.Sprintf("Failed to update PodGang %s with pod references", latestPodGang.Name),
 		)
@@ -601,7 +601,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 		updatedPodGang := &groveschedulerv1alpha1.PodGang{}
 		if err := r.client.Get(sc.ctx, client.ObjectKeyFromObject(latestPodGang), updatedPodGang); err != nil {
 			return groveerr.WrapError(err,
-				errCodeUpdatePodGang,
+				errCodeCreateOrPatchPodGang,
 				component.OperationSync,
 				fmt.Sprintf("Failed to get updated PodGang %s", latestPodGang.Name),
 			)
@@ -614,7 +614,7 @@ func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *grov
 
 		if err := r.client.Status().Patch(sc.ctx, updatedPodGang, client.MergeFrom(original)); err != nil {
 			return groveerr.WrapError(err,
-				errCodeUpdatePodGang,
+				errCodeCreateOrPatchPodGang,
 				component.OperationSync,
 				fmt.Sprintf("Failed to update PodGang %s status", latestPodGang.Name),
 			)

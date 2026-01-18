@@ -154,7 +154,7 @@ func (v *pcsValidator) validatePodCliqueTemplates(fldPath *field.Path) ([]string
 	// Validate that the scheduler name matches the one Grove was configured with
 	if len(uniqueSchedulerNames) > 0 && v.schedulerName != "" {
 		userSchedulerName := uniqueSchedulerNames[0]
-		
+
 		if userSchedulerName != v.schedulerName {
 			allErrs = append(allErrs, field.Invalid(
 				fldPath.Child("spec").Child("podSpec").Child("schedulerName"),

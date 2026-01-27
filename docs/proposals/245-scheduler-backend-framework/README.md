@@ -140,18 +140,39 @@ As a cluster administrator, I want to migrate from one scheduler to another (e.g
 
 ### Architecture Overview
 
-The Scheduler Backend Framework introduces a clean separation between Grove's control plane logic and scheduler-specific implementations. The architecture consists of the following components:
+The Scheduler Backend Framework introduces a clean separation between Grove's control plane logic and scheduler-specific implementations. The architecture is organized into four distinct layers:
 
 <img src="assets/scheduler-backend-architecture.excalidraw.png" alt="scheduler-backend-architecture" style="zoom:50%;" />
 
-**Key Data Flow:**
+#### Layer 1: Configuration Layer
+User-facing configuration that defines which scheduler backend to use:
+- **OperatorConfiguration**: Kubernetes CR with `schedulerName` field
+- **Helm Values**: Deployment-time configuration (`config.schedulerName`)
 
-1. **PodCliqueSet Controller** → Creates PodGang (empty PodReferences, Initialized=False)
-2. **Backend Controller** → Watches PodGang → Calls `backend.SyncPodGang()` → Creates scheduler CRs
-3. **PodClique Controller** → Creates Pods → Calls `backend.PreparePod()` → Sets schedulerName
-4. **PodCliqueSet Controller** → Fills PodReferences → Sets Initialized=True
-5. **PodClique Controller** → Observes Initialized=True → Removes scheduling gates
-6. **Scheduler** → Schedules pods
+#### Layer 2: Grove Control Plane
+Core controllers managing Grove workload lifecycle:
+- **PodCliqueSet Controller**: Creates PodGang resources, fills PodReferences
+- **Backend Controller**: Watches PodGang, calls `SyncPodGang()` to create scheduler CRs
+- **PodClique Controller**: Creates Pods, calls `PreparePod()` to configure scheduler settings
+- **Resources**: PodGang (with Initialized condition) and Pod (with schedulerName/gates)
+
+#### Layer 3: Scheduler Backend Layer
+Abstraction layer bridging Grove and specific schedulers:
+- **Backend Manager**: Singleton that initializes and provides access to active backend
+- **KAI Backend**: Implementation for KAI scheduler (creates PodGroup CRs in future)
+- **Kube Backend**: Minimal implementation for default scheduler (no custom CRs)
+
+#### Layer 4: Scheduler Layer
+Kubernetes schedulers that actually place pods:
+- **KAI Scheduler**: Gang scheduling with topology awareness
+- **Kube Scheduler**: Default Kubernetes scheduler
+- **KAI PodGroup**: Custom resource consumed by KAI scheduler (future phase)
+
+**Key Data Flow:**
+1. Operator startup → `Initialize(schedulerName)` → Backend Manager initializes backend
+2. PodCliqueSet Controller creates PodGang → Backend Controller watches → `SyncPodGang()` creates scheduler CRs
+3. PodClique Controller creates Pods → `PreparePod()` sets schedulerName and annotations
+4. PodCliqueSet fills PodReferences → Sets `Initialized=True` → Gates removed → Scheduler places pods
 
 ### Backend Interface Definition
 

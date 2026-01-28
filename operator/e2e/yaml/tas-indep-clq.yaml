@@ -42,7 +42,7 @@ spec:
                 image: registry:5001/nginx:alpine-slim
                 resources:
                   requests:
-                    memory: 80Mi
+                    memory: 30Mi
       - name: worker-block
         labels:
           kai.scheduler/queue: test
@@ -73,4 +73,4 @@ spec:
                 image: registry:5001/nginx:alpine-slim
                 resources:
                   requests:
-                    memory: 80Mi
+                    memory: 30Mi

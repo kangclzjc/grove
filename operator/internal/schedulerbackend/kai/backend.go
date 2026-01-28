@@ -19,8 +19,6 @@ package kai
 import (
 	"context"
 
-	"github.com/ai-dynamo/grove/operator/api/common"
-
 	groveschedulerv1alpha1 "github.com/ai-dynamo/grove/scheduler/api/core/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -95,17 +93,4 @@ func (b *Backend) OnPodGangDelete(_ context.Context, _ *groveschedulerv1alpha1.P
 func (b *Backend) PreparePod(pod *corev1.Pod) {
 	// Set scheduler name from configuration
 	pod.Spec.SchedulerName = b.schedulerName
-
-	// Add annotations for observability
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-
-	// Get PodGang and PodGroup names from labels
-	if podGangName, ok := pod.Labels[common.LabelPodGang]; ok {
-		pod.Annotations["kai.scheduler/podgang"] = podGangName
-	}
-	if podCliqueName, ok := pod.Labels[common.LabelPodClique]; ok {
-		pod.Annotations["kai.scheduler/podgroup"] = podCliqueName
-	}
 }

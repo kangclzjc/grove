@@ -433,15 +433,8 @@ func (r _resource) runSyncFlow(sc *syncContext) syncFlowResult {
 		result.errs = append(result.errs, err)
 		return result
 	}
-	result = r.createOrUpdatePodGangs(sc)
-	if result.hasErrors() {
-		return result
-	}
-	// After creating/updating PodGangs, update them with pod references if all pods are created
-	if err := r.updatePodGangsWithPodReferences(sc); err != nil {
-		result.recordError(err)
-	}
-	return result
+	// Create/update PodGangs and populate PodReferences if all pods are ready
+	return r.createOrUpdatePodGangs(sc)
 }
 
 // deleteExcessPodGangs removes PodGangs that are no longer needed.
@@ -474,6 +467,8 @@ func (r _resource) deleteExcessPodGangs(sc *syncContext) error {
 // PodGangs are created with empty podReferences, Initialized=False.
 func (r _resource) createOrUpdatePodGangs(sc *syncContext) syncFlowResult {
 	result := syncFlowResult{}
+
+	// Step 1: Create or update all expected PodGangs with basic structure
 	for _, podGang := range sc.expectedPodGangs {
 		sc.logger.Info("[createOrUpdatePodGangs] processing PodGang", "fqn", podGang.fqn)
 
@@ -484,65 +479,58 @@ func (r _resource) createOrUpdatePodGangs(sc *syncContext) syncFlowResult {
 		}
 		result.recordPodGangCreation(podGang.fqn)
 	}
-	return result
-}
 
-// updatePodGangsWithPodReferences updates PodGangs with pod references after Pods are created.
-// Sets PodGangInitialized condition to True when all pods are present.
-func (r _resource) updatePodGangsWithPodReferences(sc *syncContext) error {
-	sc.logger.Info("Updating PodGang resources with pod references")
-
-	// Update each existing PodGang with its pod references
-	// Use existingPodGangNames from syncContext to avoid unnecessary List API call
-	// Note: updatePodGangWithPodReferences will Get the latest PodGang internally and use sc.pclqPods directly
+	// Step 2: For existing PodGangs, try to update PodReferences if all pods are created
+	// Skip newly created PodGangs as their pods won't be ready yet
 	for _, podGangName := range sc.existingPodGangNames {
-		podGang := &groveschedulerv1alpha1.PodGang{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podGangName,
-				Namespace: sc.pcs.Namespace,
-			},
-		}
-		if err := r.updatePodGangWithPodReferences(sc, podGang); err != nil {
-			// Don't return error immediately, continue updating other PodGangs
-			// Errors like "not all pods created" are expected and will trigger requeue
-			if errors.Is(err, groveerr.New(groveerr.ErrCodeRequeueAfter, component.OperationSync, "")) {
-				return err
+		if err := r.updatePodGangWithPodReferences(sc, podGangName); err != nil {
+			// Check if this is a "waiting for pods" error
+			var groveErr *groveerr.GroveError
+			if errors.As(err, &groveErr) && groveErr.Code == groveerr.ErrCodeRequeueAfter {
+				// Expected error: pods not ready yet, record but continue with other PodGangs
+				sc.logger.Info("PodGang waiting for pods to be created, will retry in next reconcile",
+					"podGang", podGangName)
+				result.recordError(err)
+			} else {
+				// Unexpected error: log and record, but continue with other PodGangs
+				sc.logger.Error(err, "Failed to update PodGang with pod references",
+					"podGang", podGangName)
+				result.recordError(err)
 			}
-			sc.logger.Error(err, "Failed to update PodGang with pod references", "podGang", podGang.Name)
 		}
 	}
 
-	return nil
+	return result
 }
 
 // updatePodGangWithPodReferences updates a PodGang with pod references and sets Initialized condition.
-func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
+func (r _resource) updatePodGangWithPodReferences(sc *syncContext, podGangName string) error {
 	// Find the podGangInfo from expectedPodGangs
-	podGangInfo, found := r.findPodGangInfo(sc, podGang.Name)
+	podGangInfo, found := r.findPodGangInfo(sc, podGangName)
 	if !found {
 		return nil
 	}
 
 	// Verify all pods are created before proceeding
-	if err := r.verifyAllPodsCreated(sc, podGang.Name, podGangInfo); err != nil {
+	if err := r.verifyAllPodsCreated(sc, podGangName, podGangInfo); err != nil {
 		return err
 	}
 
 	// Update pod references using Patch (no need to fetch from API server!)
-	if err := r.patchPodGangWithPodReferences(sc, podGang, podGangInfo); err != nil {
+	if err := r.patchPodGangWithPodReferences(sc, podGangName, podGangInfo); err != nil {
 		return err
 	}
 
 	// Update status to set Initialized=True (idempotent - no need to check current state)
-	return r.patchPodGangInitializedStatus(sc, podGang)
+	return r.patchPodGangInitializedStatus(sc, podGangName)
 }
 
 // patchPodGangInitializedStatus sets Initialized condition to True
-func (r _resource) patchPodGangInitializedStatus(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang) error {
+func (r _resource) patchPodGangInitializedStatus(sc *syncContext, podGangName string) error {
 	// Create a PodGang object with only the status we want to patch
 	statusPatch := &groveschedulerv1alpha1.PodGang{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podGang.Name,
+			Name:      podGangName,
 			Namespace: sc.pcs.Namespace,
 		},
 	}
@@ -555,24 +543,24 @@ func (r _resource) patchPodGangInitializedStatus(sc *syncContext, podGang *grove
 	if err := r.client.Status().Patch(sc.ctx, statusPatch, client.Merge); err != nil {
 		// Log but don't fail - status update is not critical
 		sc.logger.Error(err, "Failed to patch PodGang status with Initialized condition",
-			"podGang", podGang.Name)
+			"podGang", podGangName)
 		return nil // Don't fail the entire operation for status updates
 	}
 
 	sc.logger.Info("Successfully updated PodGang with pod references and set Initialized=True",
-		"podGang", podGang.Name)
+		"podGang", podGangName)
 	return nil
 }
 
 // patchPodGangWithPodReferences uses strategic merge patch to update pod references
-func (r _resource) patchPodGangWithPodReferences(sc *syncContext, podGang *groveschedulerv1alpha1.PodGang, podGangInfo *podGangInfo) error {
+func (r _resource) patchPodGangWithPodReferences(sc *syncContext, podGangName string, podGangInfo *podGangInfo) error {
 	// Build PodGroups with pod references from syncContext
 	podGroups := r.buildPodGroupsFromContext(sc, podGangInfo)
 
 	// Create patch object
 	patchPodGang := &groveschedulerv1alpha1.PodGang{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podGang.Name,
+			Name:      podGangName,
 			Namespace: sc.pcs.Namespace,
 		},
 		Spec: groveschedulerv1alpha1.PodGangSpec{
@@ -585,12 +573,12 @@ func (r _resource) patchPodGangWithPodReferences(sc *syncContext, podGang *grove
 		return groveerr.WrapError(err,
 			errCodeCreateOrPatchPodGang,
 			component.OperationSync,
-			fmt.Sprintf("Failed to patch PodGang %s with pod references", podGang.Name),
+			fmt.Sprintf("Failed to patch PodGang %s with pod references", podGangName),
 		)
 	}
 
 	sc.logger.Info("Successfully patched PodGang with pod references",
-		"podGang", podGang.Name,
+		"podGang", podGangName,
 		"numPodGroups", len(podGroups))
 	return nil
 }

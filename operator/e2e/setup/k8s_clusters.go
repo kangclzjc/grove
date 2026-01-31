@@ -804,9 +804,16 @@ func replaceNotReadyNode(ctx context.Context, node *v1.Node, clientset *kubernet
 		return fmt.Errorf("failed to restart container for node %s: %w", nodeName, err)
 	}
 
-	// Step 3: Reapply original labels to the replaced node
+	// Step 3: Wait for the node to become ready
+	logger.Debugf("⏳ Waiting for node to become ready: %s", nodeName)
+	readyNode, err := utils.WaitAndGetReadyNode(ctx, clientset, nodeName, defaultPollTimeout, logger)
+	if err != nil {
+		return fmt.Errorf("node %s did not become ready: %w", nodeName, err)
+	}
+
+	// Step 4: Reapply original labels to the replaced node
 	logger.Debugf("🏷️  Reapplying original labels to replaced node: %s", nodeName)
-	if err := reapplyNodeLabels(ctx, clientset, nodeName, originalNodeLabels, logger); err != nil {
+	if err := reapplyNodeLabels(ctx, clientset, readyNode, originalNodeLabels, logger); err != nil {
 		return fmt.Errorf("failed to reapply labels to node %s: %w", nodeName, err)
 	}
 
@@ -1173,13 +1180,7 @@ func waitForWebhookReady(ctx context.Context, restConfig *rest.Config, logger *u
 }
 
 // reapplyNodeLabels reapplies the original labels to a replaced node
-func reapplyNodeLabels(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, labels map[string]string, logger *utils.Logger) error {
-	// Get the current node to merge with existing labels
-	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %w", nodeName, err)
-	}
-
+func reapplyNodeLabels(ctx context.Context, clientset *kubernetes.Clientset, node *v1.Node, labels map[string]string, logger *utils.Logger) error {
 	// Merge original labels with current labels (preserving any new system labels)
 	if node.Labels == nil {
 		node.Labels = make(map[string]string)
@@ -1189,11 +1190,11 @@ func reapplyNodeLabels(ctx context.Context, clientset *kubernetes.Clientset, nod
 	}
 
 	// Update the node with the merged labels
-	_, err = clientset.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+	_, err := clientset.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to update node %s with labels: %w", nodeName, err)
+		return fmt.Errorf("failed to update node %s with labels: %w", node.Name, err)
 	}
 
-	logger.Debugf("✅ Reapplied original labels to node %s", nodeName)
+	logger.Debugf("✅ Reapplied original labels to node %s", node.Name)
 	return nil
 }

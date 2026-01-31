@@ -21,6 +21,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -45,9 +46,12 @@ func WaitAndGetReadyNode(ctx context.Context, clientset *kubernetes.Clientset, n
 	err := PollForCondition(ctx, timeout, defaultPollInterval, func() (bool, error) {
 		node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
-			// Node might not have rejoined yet (k3d agent still starting up)
-			logger.Debugf("  Node %s not found yet (k3d agent still connecting), waiting...", nodeName)
-			return false, nil
+			// If node is not found, it's expected (k3d agent still starting up), continue waiting
+			if errors.IsNotFound(err) {
+				logger.Debugf("  Node %s not found yet (k3d agent still connecting), waiting...", nodeName)
+				return false, nil
+			}
+			return false, err
 		}
 
 		if IsNodeReady(node) {

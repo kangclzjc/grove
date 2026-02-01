@@ -79,11 +79,9 @@ func TestInitialize(t *testing.T) {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
 				assert.Nil(t, Get())
-				assert.False(t, IsInitialized())
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, Get())
-				assert.True(t, IsInitialized())
 				assert.Equal(t, tt.expectedName, Get().Name())
 			}
 		})
@@ -103,15 +101,12 @@ func TestInitializeOnce(t *testing.T) {
 	// First initialization should succeed
 	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
 	require.NoError(t, err)
-	assert.Equal(t, string(configv1alpha1.SchedulerNameKai), GetSchedulerName())
 	firstBackend := Get()
 	require.NotNil(t, firstBackend)
 
 	// Second initialization should be ignored (due to sync.Once)
 	err = Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKube)
 	require.NoError(t, err)
-	// Backend should still be kai-scheduler, not default-scheduler
-	assert.Equal(t, string(configv1alpha1.SchedulerNameKai), GetSchedulerName())
 	assert.Equal(t, firstBackend, Get())
 }
 
@@ -137,70 +132,6 @@ func TestGet(t *testing.T) {
 	assert.Equal(t, string(configv1alpha1.SchedulerNameKai), backend.Name())
 }
 
-// TestMustGet tests the MustGet function.
-func TestMustGet(t *testing.T) {
-	// Reset global state
-	globalBackend = nil
-	globalSchedulerName = ""
-	initOnce = sync.Once{}
-
-	// Before initialization, MustGet should panic
-	assert.Panics(t, func() {
-		MustGet()
-	})
-
-	// After initialization, MustGet should return the backend
-	cl := testutils.CreateDefaultFakeClient(nil)
-	recorder := record.NewFakeRecorder(10)
-
-	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
-	require.NoError(t, err)
-
-	assert.NotPanics(t, func() {
-		backend := MustGet()
-		assert.NotNil(t, backend)
-		assert.Equal(t, "kai-scheduler", backend.Name())
-	})
-}
-
-// TestGetSchedulerName tests the GetSchedulerName function.
-func TestGetSchedulerName(t *testing.T) {
-	// Reset global state
-	globalBackend = nil
-	globalSchedulerName = ""
-	initOnce = sync.Once{}
-
-	// Before initialization, GetSchedulerName should return empty string
-	assert.Equal(t, "", GetSchedulerName())
-
-	// After initialization with kai scheduler
-	cl := testutils.CreateDefaultFakeClient(nil)
-	recorder := record.NewFakeRecorder(10)
-
-	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
-	require.NoError(t, err)
-	assert.Equal(t, string(configv1alpha1.SchedulerNameKai), GetSchedulerName())
-}
-
-// TestIsInitialized tests the IsInitialized function.
-func TestIsInitialized(t *testing.T) {
-	// Reset global state
-	globalBackend = nil
-	globalSchedulerName = ""
-	initOnce = sync.Once{}
-
-	// Before initialization
-	assert.False(t, IsInitialized())
-
-	// After successful initialization
-	cl := testutils.CreateDefaultFakeClient(nil)
-	recorder := record.NewFakeRecorder(10)
-
-	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
-	require.NoError(t, err)
-	assert.True(t, IsInitialized())
-}
-
 // TestInitializeFailedInit tests that failed initialization leaves state as not initialized.
 func TestInitializeFailedInit(t *testing.T) {
 	// Reset global state
@@ -216,8 +147,5 @@ func TestInitializeFailedInit(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported scheduler")
 
-	// Verify state is not initialized
-	assert.False(t, IsInitialized())
 	assert.Nil(t, Get())
-	assert.Equal(t, "", GetSchedulerName())
 }

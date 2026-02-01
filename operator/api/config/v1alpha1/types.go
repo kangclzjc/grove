@@ -62,14 +62,9 @@ const (
 )
 
 var (
-	// AllSchedulerNames is a slice of all available scheduler names.
-	AllSchedulerNames = []SchedulerName{SchedulerNameKai, SchedulerNameKube}
+	// SupportedSchedulerNames is a slice of all supported scheduler names.
+	SupportedSchedulerNames = []SchedulerName{SchedulerNameKai, SchedulerNameKube}
 )
-
-// SupportedSchedulerNames returns all supported scheduler names.
-func SupportedSchedulerNames() []SchedulerName {
-	return AllSchedulerNames
-}
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 

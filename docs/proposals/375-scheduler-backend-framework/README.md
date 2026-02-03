@@ -289,8 +289,6 @@ func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder reco
 			return
 		}
 
-		globalSchedulerName = schedulerName
-
 		// Initialize the backend
 		if err := globalBackend.Init(); err != nil {
 			initErr = fmt.Errorf("failed to initialize backend: %w", err)
@@ -336,8 +334,8 @@ type OperatorConfiguration struct {
 	
 	// SchedulerName is the name of the scheduler backend with which this instance of Grove operator will run.
 	// Valid values: "kai-scheduler" or "default-scheduler"
-	// Defaults to "default-scheduler" if not specified.
-	// +optional
+	// +required
+	// +kubebuilder:validation:Enum=kai-scheduler;default-scheduler
 	SchedulerName string `json:"schedulerName,omitempty"`
 	
 	// TopologyAwareScheduling configures TAS (existing field)
@@ -361,7 +359,7 @@ config:
   # SchedulerName is the name of the scheduler backend
   # Valid values: "kai-scheduler" or "default-scheduler"
   # Default: "default-scheduler"
-  schedulerName: ""
+  schedulerName: "default-scheduler"
   logLevel: info
   logFormat: json
   topologyAwareScheduling:
@@ -403,24 +401,8 @@ func (b *Backend) OnPodGangDelete(_ context.Context, _ *groveschedulerv1alpha1.P
 }
 
 // PreparePod adds KAI scheduler-specific configuration to the Pod.
-// This includes: schedulerName and annotations for observability.
-func (b *Backend) PreparePod(pod *corev1.Pod) {
-    // Set scheduler name from configuration
-    pod.Spec.SchedulerName = b.schedulerName
-
-    // Add annotations for observability
-    if pod.Annotations == nil {
-        pod.Annotations = make(map[string]string)
-    }
-
-    // Get PodGang and PodClique names from labels
-    if podGangName, ok := pod.Labels[common.LabelPodGang]; ok {
-        pod.Annotations["kai.scheduler/podgang"] = podGangName
-    }
-    if podCliqueName, ok := pod.Labels[common.LabelPodClique]; ok {
-        pod.Annotations["kai.scheduler/podgroup"] = podCliqueName
-    }
-}
+// This includes: labels and annotations for observability.
+func (b *Backend) PreparePod(_ *corev1.Pod) {}
 ```
 
 **Phase 1 vs Phase 2:**
@@ -462,10 +444,7 @@ func (b *Backend) OnPodGangDelete(_ context.Context, _ *groveschedulerv1alpha1.P
 
 // PreparePod adds Kubernetes default scheduler-specific configuration to the Pod.
 // This simply sets the scheduler name.
-func (b *Backend) PreparePod(pod *corev1.Pod) {
-	// Set scheduler name from configuration
-	pod.Spec.SchedulerName = b.schedulerName
-}
+func (b *Backend) PreparePod(_ *corev1.Pod) {}
 ```
 
 ### PodGang Lifecycle Changes
@@ -568,28 +547,24 @@ func podGangSpecChangePredicate() predicate.Predicate {
 
 ### Pod Template Mutation
 
-During pod creation, the backend mutates the pod specification:
+During pod creation, the backend mutates the pod specification in operator/internal/controller/podclique/components/pod/pod.go:
 
 ```go
-func (r *PodCliqueSetReconciler) createPod(ctx context.Context, podGroup *schedulerv1alpha1.PodGroup, podGang *schedulerv1alpha1.PodGang) error {
-	pod := r.buildPodFromTemplate(podGroup)
-	
-	// Get the configured backend
-	backend, err := r.backendRegistry.GetActiveBackend()
-	if err != nil {
-		return fmt.Errorf("failed to get scheduler backend: %w", err)
+// buildResource constructs a Pod resource from PodClique specifications, setting up metadata, labels, scheduling gates, and dependencies
+func (r _resource) buildResource(pcs *grovecorev1alpha1.PodCliqueSet, pclq *grovecorev1alpha1.PodClique, podGangName string, pod *corev1.Pod, podIndex int) error {
+	...
+
+	pod.Spec.SchedulerName = schedulerbackend.Get().Name()
+
+	// Use backend to prepare Pod spec based on scheduler requirements
+	// This adds labels, annotations, etc.
+	if err = schedulerbackend.PreparePod(pod); err != nil {
+		return groveerr.WrapError(err,
+			errCodeBuildPodResource,
+			component.OperationSync,
+			"failed to prepare pod spec with scheduler backend",
+		)
 	}
-	
-	// Allow backend to mutate pod spec
-	if err := backend.MutatePodSpec(ctx, &pod.Spec, podGroup, podGang); err != nil {
-		return fmt.Errorf("backend MutatePodSpec failed: %w", err)
-	}
-	
-	if err := r.Create(ctx, pod); err != nil {
-		return fmt.Errorf("failed to create pod: %w", err)
-	}
-	
-	return nil
 }
 ```
 

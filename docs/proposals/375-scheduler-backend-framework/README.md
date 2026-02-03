@@ -59,15 +59,7 @@ tags, and then generate by invoking the make target `update-toc`.
 Grove's scheduler API is currently integrated with the KAI scheduler as the only advanced AI scheduler that supports hierarchical gang-scheduling and topology-aware scheduling. While any custom scheduler can integrate with Grove's PodGang scheduling API, the onus remains on the external scheduler to do the heavy lifting of the integration effort. It also becomes difficult to add any scheduler specific logic from the operator. This proposal introduces a Scheduler Backend Framework that standardizes and simplifies the process of adding new scheduler support directly into Grove, making it easier to handle scheduler specific logic in its own backend.
 
 ## Motivation
-Grove's unified API for AI workloads--training, inference, agents, etc.--allows the Grove operator to realize a workload's scheduling constraints through the PodGang API. Since the PodGang API is specific to Grove, it needs to be translated to constraints that are specific to the backend scheduler. While it is possible for each scheduler to support Grove independently by implementing its own translation layer, it will likely introduce maintenance issues over time as Grove keep evolving its scheduler constraint generation capabilities.
-Many scenarios and customers today use different schedulers, including the Kubernetes default scheduler and schedulers built on the scheduler plugin framework. These schedulers require appropriate support from Grove, especially as the Kubernetes community continues to improve AI workload scheduling capabilities, including gang scheduling and topology-aware scheduling (TAS). Even the KAI scheduler required modifications to support Grove's PodGang API. 
-
-The current tight coupling between Grove and specific scheduler implementations creates several challenges:
-
-* **High Integration Cost**: Adding support for a new scheduler requires extensive modifications across Grove's codebase, touching multiple components and requiring deep knowledge of both Grove and the target scheduler's internals.
-* **Maintenance Burden**: Each scheduler integration introduces scheduler-specific code paths that must be maintained independently, increasing complexity and the risk of regressions.
-* **Limited Extensibility**: The lack of a standardized interface makes it difficult for third-party scheduler developers to integrate with Grove without modifying Grove's core code.
-* **Scheduler Vendor Lock-in**: Users who want to switch schedulers face significant migration challenges due to scheduler-specific implementations.
+Grove's unified API for AI workloads *training, inference, agents, etc.* allows the Grove operator to realize a workload's scheduling constraints through the PodGang API. Since the PodGang API is specific to Grove, it needs to be translated to constraints that are specific to the backend scheduler. While it is possible for each scheduler to support Grove independently by implementing its own translation layer, it will likely introduce maintenance issues over time as Grove keep evolving its scheduler constraint generation capabilities.
 
 Introducing a Scheduler Backend Framework addresses these challenges by providing:
 

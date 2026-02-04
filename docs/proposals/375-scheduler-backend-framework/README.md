@@ -94,7 +94,7 @@ The Scheduler Backend Framework introduces a plugin-like architecture that decou
 3. **Lifecycle Hooks**: Well-defined points in the PodGang lifecycle where backend schedulers can inject custom logic.
 
 The framework follows a plugin-based architecture where:
-- Grove manages the high-level workflow and PodGang lifecycle
+- Grove manages the high-level workflow and `PodGang` lifecycle.
 - Scheduler backends implement the interface to provide scheduler-specific behavior
 - The operator configuration determines which backend is active at runtime
 

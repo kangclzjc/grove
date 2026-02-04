@@ -93,9 +93,9 @@ The Scheduler Backend Framework introduces a plugin-like architecture that decou
 3. **Lifecycle Hooks**: Well-defined points in the PodGang lifecycle where backend schedulers can inject custom logic.
 
 The framework follows an architecture where:
-- Grove manages the high-level workflow and `PodGang` lifecycle.
-- Scheduler backend(s) implement the interface to provide scheduler-specific behavior.
-- The operator configuration determines which scheduler backend is active at runtime.
+- Grove manages the high-level workflow and `PodGang` lifecycle
+- Scheduler backend(s) implement the interface to provide scheduler-specific behavior
+- The operator configuration determines which scheduler backend is active at runtime
 
 ### User Stories
 
@@ -115,15 +115,17 @@ As a cluster administrator, I want to migrate from one scheduler to another (e.g
 
 #### Single Active Scheduler Backend
 
-**Limitation**
+**Limitation**:
 If workload operators wish to have a flexibility to configure different schedulers at `PodCliqueSet` level within the same cluster, then this version of GREP does not offer that capability.
 
 **Mitigation**
 Kubernetes clusters typically run with a single scheduler to prevent resource contention across schedulers, unless care is taken to create multiple node pools and each scheduler is exclusively associated with a subset of node pools. In this version of the GREP this limitation is acceptable. Users who require multiple schedulers can run separate Grove installations with different active scheduler backend in each cluster.
 
-**Limitation**: In the initial implementation, Grove can only be configured with one scheduler backend per deployment. Users cannot mix schedulers for different workloads within the same Grove installation.
+**Limitation**:
+In the initial implementation, Grove can only be configured with one scheduler backend per deployment. Users cannot mix schedulers for different workloads within the same Grove installation.
 
-**Mitigation**: This is acceptable for most use cases as clusters typically standardize on a single scheduler. Users requiring multiple schedulers can run separate Grove installations with different configurations in different clusters.
+**Mitigation**:
+This is acceptable for most use cases as clusters typically standardize on a single scheduler. Users requiring multiple schedulers can run separate Grove installations with different configurations in different clusters.
 
 #### Backend API Stability
 
@@ -137,7 +139,8 @@ Kubernetes clusters typically run with a single scheduler to prevent resource co
 
 #### Scheduler Capability Mismatch
 
-**Risk**: Different schedulers have varying capabilities, which may not align with the uniform capability set exposed through the PodGang API.
+**Limitation**:
+Different schedulers have varying capabilities, which may not align with the uniform capability set exposed through the PodGang API.
 
 **Mitigation**:
 - **For Missing Capabilities**: The PodCliqueSet status should surface conditions indicating when requested features are not supported by the configured scheduler backend. This provides clear feedback to users about capability mismatches.
@@ -176,10 +179,14 @@ Kubernetes schedulers that actually place pods:
 - **KAI PodGroup**: Custom resource consumed by KAI scheduler (future phase)
 
 **Key Data Flow:**
-1. Operator startup → `Initialize(schedulerName)` → Backend Manager initializes backend
-2. PodCliqueSet Controller creates PodGang with `Initialized=False` → Backend Controller watches → `SyncPodGang()` creates scheduler CRs
-3. PodClique Controller creates Pods → `PreparePod()` sets schedulerName and annotations
-4. PodCliqueSet fills PodReferences → Sets `Initialized=True` → Gates removed → Scheduler places pods
+
+The framework orchestrates workload scheduling through a coordinated flow between layers:
+1. **Backend Initialization**: Operator startup initializes the configured scheduler backend via Backend Manager
+2. **PodGang Creation**: PodCliqueSet Controller creates PodGang resources with `Initialized=False` condition, triggering Backend Controller to create scheduler-specific resources via `SyncPodGang()`
+3. **Pod Configuration**: PodClique Controller creates Pods with scheduling gates, calling `PreparePod()` to inject scheduler-specific settings
+4. **Scheduling Activation**: Once all pods exist and PodReferences are populated, the `Initialized` condition is set to `True`, gates are removed, and scheduling begins
+
+For detailed lifecycle flow, see [PodGang Lifecycle Changes](#podgang-lifecycle-changes).
 
 ### Backend Interface Definition
 
@@ -314,10 +321,9 @@ config:
 
 #### New Flow (With Framework):
 1. **Create PodGang early** with PodGroups having empty PodReferences and `Initialized=False`
-2. **Backend Controller reacts** to PodGang creation and calls `SyncPodGang` to create scheduler-specific resources
-3. **Pods are created** (with scheduling gates blocking actual scheduling)
-4. **Operator fills PodReferences** once all pods exist, and sets `Initialized=True`
-5. **PodClique Controller observes** `Initialized=True` and removes scheduling gates to allow scheduling
+2. **Create Pods** (with scheduling gates to block scheduling)
+3. **Update PodGang** with PodReferences once all pods are created, and set `Initialized=True`
+4. **Scheduling gates removed** to allow pods to be scheduled
 
 #### New PodGang Status Condition
 

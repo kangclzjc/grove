@@ -30,9 +30,6 @@
   - [Backend Controller](#backend-controller)
   - [Monitoring](#monitoring)
     - [Status Conditions](#status-conditions)
-  - [Dependencies](#dependencies)
-    - [Required Dependencies](#required-dependencies)
-    - [Optional Dependencies](#optional-dependencies)
   - [Test Plan](#test-plan)
     - [Unit Tests](#unit-tests)
     - [E2E Tests](#e2e-tests)
@@ -365,20 +362,6 @@ Condition States:
 | --------- | ----------------------------------- | ------------------------------------------------------------ |
 | `True`    | `AllPodsCreated`  | All pods have been created and references populated |
 | `False`   | `PodsNotCreated` | Waiting for all pods to be created and wait for all pods references to be filled in PodGang|
-
-
-### Dependencies
-
-#### Required Dependencies
-
-1. **Scheduler Implementation**: Each backend requires its corresponding scheduler to be deployed:
-   - KAI Backend: [KAI Scheduler](https://github.com/NVIDIA/KAI-Scheduler) must be deployed
-   - Default Backend: Standard Kubernetes scheduler
-
-#### Optional Dependencies
-1. **Backend-Specific CRDs**: Some backends may require additional CRDs to be installed:
-   - KAI Backend: KAI PodGang CRD, Topology CRD (if TAS is enabled)
-   - Future backends: Custom CRDs as defined by the scheduler implementation
 
 
 ### Test Plan

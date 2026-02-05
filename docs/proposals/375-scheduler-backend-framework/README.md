@@ -149,7 +149,7 @@ Different schedulers have varying capabilities, which may not align with the uni
 
 The Scheduler Backend Framework introduces a clean separation between Grove's control plane logic and scheduler-specific implementations. The architecture is organized into four distinct layers:
 
-<img src="assets/scheduler-backend-framework.png" alt="scheduler-backend-architecture" style="zoom:50%;" />
+<img src="assets/scheduler-backend-framework.excalidraw.png" alt="scheduler-backend-framework-architecture" style="zoom:50%;" />
 
 #### Layer 1: Configuration Layer
 User-facing configuration that defines which scheduler backend to use:
@@ -173,7 +173,6 @@ Abstraction layer bridging Grove and specific schedulers:
 Kubernetes schedulers that actually place pods:
 - **KAI Scheduler**: Gang scheduling with topology awareness
 - **Kube Scheduler**: Default Kubernetes scheduler
-- **KAI PodGroup**: Custom resource consumed by KAI scheduler (future phase)
 
 **Key Data Flow:**
 

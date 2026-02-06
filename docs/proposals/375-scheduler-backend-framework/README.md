@@ -268,7 +268,7 @@ type OperatorConfiguration struct {
 	// Valid values: "kai-scheduler" or "default-scheduler"
 	// +required
 	// +kubebuilder:validation:Enum=kai-scheduler;default-scheduler
-	SchedulerName string `json:"schedulerName,omitempty"`
+	SchedulingBackend SchedulerBackend `json:"schedulerName,omitempty"`
 	
 	// TopologyAwareScheduling configures TAS (existing field)
 	TopologyAwareScheduling TopologyAwareSchedulingConfiguration `json:"topologyAwareScheduling"`

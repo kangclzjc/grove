@@ -37,7 +37,7 @@ func Register(mgr manager.Manager, operatorCfg configv1alpha1.OperatorConfigurat
 	if err := defaultingWebhook.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("failed adding %s webhook handler: %v", defaulting.Name, err)
 	}
-	pcsValidatingWebhook := pcsvalidation.NewHandler(mgr, operatorCfg.TopologyAwareScheduling, operatorCfg.Network, string(operatorCfg.SchedulerName))
+	pcsValidatingWebhook := pcsvalidation.NewHandler(mgr, operatorCfg.TopologyAwareScheduling, operatorCfg.Network, operatorCfg.Scheduler)
 	slog.Info("Registering webhook with manager", "handler", pcsvalidation.Name)
 	if err := pcsValidatingWebhook.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("failed adding %s webhook handler: %v", pcsvalidation.Name, err)

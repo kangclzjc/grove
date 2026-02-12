@@ -46,11 +46,13 @@ type pcsValidator struct {
 	pcs                    *grovecorev1alpha1.PodCliqueSet
 	tasEnabled             bool
 	clusterTopologyDomains []string
-	schedulerName          string
+	schedulerConfig        groveconfigv1alpha1.SchedulerConfiguration
 }
 
 // newPCSValidator creates a new PodCliqueSet validator for the given operation.
-func newPCSValidator(pcs *grovecorev1alpha1.PodCliqueSet, operation admissionv1.Operation, tasConfig groveconfigv1alpha1.TopologyAwareSchedulingConfiguration, schedulerName string) *pcsValidator {
+// schedulerConfig is the full scheduler configuration; the validator uses it for
+// scheduler-name matching and may use per-scheduler config for future validations.
+func newPCSValidator(pcs *grovecorev1alpha1.PodCliqueSet, operation admissionv1.Operation, tasConfig groveconfigv1alpha1.TopologyAwareSchedulingConfiguration, schedulerConfig groveconfigv1alpha1.SchedulerConfiguration) *pcsValidator {
 	topologyDomains := lo.Map(tasConfig.Levels, func(level grovecorev1alpha1.TopologyLevel, _ int) string {
 		return string(level.Domain)
 	})
@@ -59,7 +61,7 @@ func newPCSValidator(pcs *grovecorev1alpha1.PodCliqueSet, operation admissionv1.
 		pcs:                    pcs,
 		tasEnabled:             tasConfig.Enabled,
 		clusterTopologyDomains: topologyDomains,
-		schedulerName:          schedulerName,
+		schedulerConfig:        schedulerConfig,
 	}
 }
 
@@ -152,14 +154,15 @@ func (v *pcsValidator) validatePodCliqueTemplates(fldPath *field.Path) ([]string
 	}
 
 	// Validate that the scheduler name matches the one Grove was configured with
-	if len(uniqueSchedulerNames) > 0 && v.schedulerName != "" {
+	configuredName := string(v.schedulerConfig.Name)
+	if len(uniqueSchedulerNames) > 0 && configuredName != "" {
 		pcsSchedulerName := uniqueSchedulerNames[0]
 
-		if pcsSchedulerName != v.schedulerName {
+		if pcsSchedulerName != configuredName {
 			allErrs = append(allErrs, field.Invalid(
 				fldPath.Child("spec").Child("podSpec").Child("schedulerName"),
 				pcsSchedulerName,
-				fmt.Sprintf("schedulerName must match the configured scheduler %q", v.schedulerName),
+				fmt.Sprintf("schedulerName must match the configured scheduler %q", configuredName),
 			))
 		}
 	}

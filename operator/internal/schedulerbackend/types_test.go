@@ -78,7 +78,7 @@ func TestPreparePod(t *testing.T) {
 			// Initialize backend
 			cl := testutils.CreateDefaultFakeClient(nil)
 			recorder := record.NewFakeRecorder(10)
-			err := Initialize(cl, cl.Scheme(), recorder, tt.schedulerName)
+			err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: tt.schedulerName})
 			require.NoError(t, err)
 
 			// Test PreparePod

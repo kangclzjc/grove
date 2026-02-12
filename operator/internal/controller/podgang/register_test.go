@@ -19,6 +19,7 @@ package podgang
 import (
 	"testing"
 
+	configv1alpha1 "github.com/ai-dynamo/grove/operator/api/config/v1alpha1"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kai"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kube"
@@ -55,9 +56,9 @@ func TestNewReconcilerWithBackendKai(t *testing.T) {
 
 			var b schedulerbackend.SchedulerBackend
 			if tt.backendType == "kai" {
-				b = kai.New(cl, cl.Scheme(), recorder)
+				b = kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 			} else {
-				b = kube.New(cl, cl.Scheme(), recorder)
+				b = kube.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKube})
 			}
 
 			reconciler := &Reconciler{
@@ -94,7 +95,7 @@ func TestReconcilerWithNilBackend(t *testing.T) {
 func TestReconcilerFields(t *testing.T) {
 	cl := testutils.CreateDefaultFakeClient(nil)
 	recorder := record.NewFakeRecorder(10)
-	b := kai.New(cl, cl.Scheme(), recorder)
+	b := kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 
 	reconciler := &Reconciler{
 		Client:  cl,

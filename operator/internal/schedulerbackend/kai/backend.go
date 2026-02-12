@@ -19,23 +19,13 @@ package kai
 import (
 	"context"
 
+	configv1alpha1 "github.com/ai-dynamo/grove/operator/api/config/v1alpha1"
+
 	groveschedulerv1alpha1 "github.com/ai-dynamo/grove/scheduler/api/core/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-)
-
-const (
-	// SchedulerName is the name of the KAI scheduler
-	SchedulerName = "kai-scheduler"
-)
-
-// PodGroup API constants (run.ai format)
-const (
-	PodGroupAPIGroup   = "scheduling.run.ai"
-	PodGroupAPIVersion = "v2alpha2"
-	PodGroupKind       = "PodGroup"
 )
 
 // Backend implements the SchedulerBackend interface for KAI scheduler
@@ -44,20 +34,23 @@ type Backend struct {
 	client        client.Client
 	scheme        *runtime.Scheme
 	eventRecorder record.EventRecorder
+	config        configv1alpha1.SchedulerConfiguration
 }
 
-// New creates a new KAI backend instance
-func New(cl client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder) *Backend {
+// New creates a new KAI backend instance. cfg is the full scheduler configuration;
+// Backend uses cfg.Name and may use cfg.Kai for kai-scheduler-specific options.
+func New(cl client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder, cfg configv1alpha1.SchedulerConfiguration) *Backend {
 	return &Backend{
 		client:        cl,
 		scheme:        scheme,
 		eventRecorder: eventRecorder,
+		config:        cfg,
 	}
 }
 
 // Name returns the backend name
 func (b *Backend) Name() string {
-	return SchedulerName
+	return string(b.config.Name)
 }
 
 // Init initializes the KAI backend

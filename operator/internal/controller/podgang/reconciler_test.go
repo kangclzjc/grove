@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	configv1alpha1 "github.com/ai-dynamo/grove/operator/api/config/v1alpha1"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kai"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kube"
@@ -136,9 +137,9 @@ func TestReconcile(t *testing.T) {
 			// Create appropriate backend
 			var b schedulerbackend.SchedulerBackend
 			if tt.schedulerName == "kai-scheduler" {
-				b = kai.New(cl, cl.Scheme(), recorder)
+				b = kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 			} else {
-				b = kube.New(cl, cl.Scheme(), recorder)
+				b = kube.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKube})
 			}
 
 			reconciler := &Reconciler{
@@ -180,7 +181,7 @@ func TestReconcilePodGangNotFound(t *testing.T) {
 	// Setup client without any podgang
 	cl := testutils.CreateDefaultFakeClient(nil)
 	recorder := record.NewFakeRecorder(10)
-	b := kai.New(cl, cl.Scheme(), recorder)
+	b := kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 
 	reconciler := &Reconciler{
 		Client:  cl,
@@ -226,7 +227,7 @@ func TestReconcilePodGangWithDeletionTimestamp(t *testing.T) {
 
 	cl := testutils.CreateDefaultFakeClient([]client.Object{podGang})
 	recorder := record.NewFakeRecorder(10)
-	b := kai.New(cl, cl.Scheme(), recorder)
+	b := kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 
 	reconciler := &Reconciler{
 		Client:  cl,
@@ -254,7 +255,7 @@ func TestReconcilePodGangWithDeletionTimestamp(t *testing.T) {
 func TestReconcilerWithExplicitBackend(t *testing.T) {
 	cl := testutils.CreateDefaultFakeClient(nil)
 	recorder := record.NewFakeRecorder(10)
-	b := kai.New(cl, cl.Scheme(), recorder)
+	b := kai.New(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 
 	reconciler := &Reconciler{
 		Client:  cl,

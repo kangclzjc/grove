@@ -72,7 +72,7 @@ func TestInitialize(t *testing.T) {
 			cl := testutils.CreateDefaultFakeClient(nil)
 			recorder := record.NewFakeRecorder(10)
 
-			err := Initialize(cl, cl.Scheme(), recorder, tt.schedulerName)
+			err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: tt.schedulerName})
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -97,13 +97,13 @@ func TestInitializeOnce(t *testing.T) {
 	recorder := record.NewFakeRecorder(10)
 
 	// First initialization should succeed
-	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
+	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 	require.NoError(t, err)
 	firstBackend := Get()
 	require.NotNil(t, firstBackend)
 
 	// Second initialization should be ignored (due to sync.Once)
-	err = Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKube)
+	err = Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKube})
 	require.NoError(t, err)
 	assert.Equal(t, firstBackend, Get())
 }
@@ -121,7 +121,7 @@ func TestGet(t *testing.T) {
 	cl := testutils.CreateDefaultFakeClient(nil)
 	recorder := record.NewFakeRecorder(10)
 
-	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerNameKai)
+	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: configv1alpha1.SchedulerNameKai})
 	require.NoError(t, err)
 
 	backend := Get()
@@ -139,7 +139,7 @@ func TestInitializeFailedInit(t *testing.T) {
 	recorder := record.NewFakeRecorder(10)
 
 	// Try to initialize with unsupported scheduler
-	err := Initialize(cl, cl.Scheme(), recorder, "unsupported-scheduler")
+	err := Initialize(cl, cl.Scheme(), recorder, configv1alpha1.SchedulerConfiguration{Name: "unsupported-scheduler"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported scheduler")
 

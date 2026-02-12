@@ -35,21 +35,20 @@ var (
 	initOnce      sync.Once
 )
 
-// Initialize creates the global backend instance based on schedulerName
-// This should be called once during operator startup
+// Initialize creates the global backend instance based on the scheduler configuration.
+// This should be called once during operator startup.
 // Supported scheduler names: "kai-scheduler", "default-scheduler"
-func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder, schedulerName configv1alpha1.SchedulerName) error {
+func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder, cfg configv1alpha1.SchedulerConfiguration) error {
 	var initErr error
 	initOnce.Do(func() {
 		// Create the appropriate backend based on scheduler name
-		switch schedulerName {
+		switch cfg.Name {
 		case configv1alpha1.SchedulerNameKai:
-			globalBackend = kai.New(client, scheme, eventRecorder)
-		// Internal fallback case for backward compatibility
+			globalBackend = kai.New(client, scheme, eventRecorder, cfg)
 		case configv1alpha1.SchedulerNameKube:
-			globalBackend = kube.New(client, scheme, eventRecorder)
+			globalBackend = kube.New(client, scheme, eventRecorder, cfg)
 		default:
-			initErr = fmt.Errorf("unsupported scheduler %q (supported: kai-scheduler, default-scheduler)", schedulerName)
+			initErr = fmt.Errorf("unsupported scheduler %q (supported: kai-scheduler, default-scheduler)", cfg.Name)
 			return
 		}
 

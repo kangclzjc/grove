@@ -84,7 +84,7 @@ func main() {
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		mgr.GetEventRecorderFor("scheduler-backend"),
-		operatorConfig.SchedulerName,
+		operatorConfig.Scheduler,
 	); err != nil {
 		logger.Error(err, "failed to initialize scheduler backend")
 		handleErrorAndExit(err, cli.ExitErrInitializeSchedulerBackend)

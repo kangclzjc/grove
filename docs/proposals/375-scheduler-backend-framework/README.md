@@ -73,7 +73,7 @@ In summary, refining Grove and introducing a Scheduler Backend Framework is both
 * **Enable Custom Resource Management**: Provide interfaces that allow Scheduler Backends to create, update, and delete their own custom resources in response to PodGang lifecycle events (create, update, delete, status changes).
 * **Simplify User Experience**: Allow users to configure their preferred scheduler backend during Grove installation via OperatorConfiguration, eliminating the need to specify schedulerName in every pod specification.
 * **Support Dynamic Backend Selection**: Enable Grove to determine which scheduler backend to use based on configuration, with clear mechanisms for backend registration and initialization.
-* **Support Multiple Scheduler Backends**: Provide built-in support for multiple scheduler backends including the Kubernetes default-scheduler and KAI scheduler, with a clear path for adding additional third-party schedulers. The framework should enable easy integration of new schedulers as the community support for advanced features (gang scheduling, topology-aware scheduling) evolves.
+* **Support Multiple Scheduler Backends**: Provide built-in support for multiple scheduler backends including the Kubernetes kube-scheduler and KAI scheduler, with a clear path for adding additional third-party schedulers. The framework should enable easy integration of new schedulers as the community support for advanced features (gang scheduling, topology-aware scheduling) evolves.
 
 ## Proposal
 
@@ -85,9 +85,9 @@ The Scheduler Backend Framework introduces a plugin-like architecture that decou
 4. **Operator Configuration**: OperatorConfiguration allows enabling multiple scheduler backends simultaneously. 
 
 The framework follows an architecture where:
+- The operator configuration determines which schedulers backend are active at runtime and which backend is default backend. We support multiple active schedulers at first. 
 - Grove manages the high-level workflow and `PodGang` lifecycle
 - Scheduler backend(s) implement the interface to provide scheduler-specific behavior
-- The operator configuration determines which schedulers backend are active at runtime and which backend is default backend. We support multiple active schedulers at first. 
 
 ### User Stories
 
@@ -99,9 +99,9 @@ As a third-party scheduler developer, I want to integrate my custom gang schedul
 
 As a platform engineer managing multiple Kubernetes clusters, I want to deploy Grove across clusters that use different schedulers (e.g., KAI in production clusters, default scheduler in development clusters). The framework should allow me to configure the appropriate scheduler backend for each cluster through OperatorConfiguration without changing workload specifications or Grove's deployment manifests.
 
-#### Story 3: Scheudler Migration Path
+#### Story 3: Scheduler Migration Path
 
-As a cluster administrator, I want to migrate from one scheduler to another (e.g., from a custom scheduler to KAI or vice versa) without significant disruption. The Scheduler Backend Framework should provide a clear migration path where I can update the OperatorConfiguration, restart Grove.
+As a cluster administrator, I want to migrate from one scheduler to another (e.g., from a custom scheduler to KAI or vice versa) without significant disruption. The Scheduler Backend Framework should provide a clear migration path where I can update the OperatorConfiguration, restart Grove to use a different scheduler in Grove.
 
 ### Limitations/Risks & Mitigations
 
@@ -121,15 +121,20 @@ As a cluster administrator, I want to migrate from one scheduler to another (e.g
 Different schedulers have varying capabilities, which may not align with the uniform capability set exposed through the PodGang API.
 
 **Mitigation**:
-- **For Missing Capabilities**: The PodCliqueSet status should surface conditions indicating when requested features are not supported by the configured scheduler backend. This provides clear feedback to users about capability mismatches.
+- **For Missing Capabilities**: The framework provides a clear contract so that each scheduler backend can decide how to handle requested features it does not support:
+  - **Fail submit**: The scheduler backend can reject PodCliqueSet when the missing capability is required for correctness or safety.
+  - **Pass through**: The backend allows the request and the workload proceeds; the backend should ensure PodCliqueSet status is updated with conditions indicating which features are not supported (e.g. "GangScheduling requested but not supported by this backend—workload scheduled without gang guarantees"). This gives users explicit feedback while allowing best-effort scheduling.
+
+  The choice between fail vs pass-through is entirely up to each backend implementation, so that different schedulers can adopt the policy that fits their semantics
 - **For Additional Capabilities**: Document and track scheduler-specific capabilities during the integration process. If a scheduler provides valuable additional features that require configuration, evaluate adding new fields to the PodCliqueSet and PodGang APIs. These API extensions can be implemented incrementally in phases as new schedulers are integrated.
 
 ### Requirements
 
 * Support multiple active scheduler backends via OperatorConfiguration.
-* kube-scheduler is always supported and is by default enabled.
-* Have a provision in OperatorConfiguration to set a default scheduler. Default this field to `kube-scheduler` if not set.
-* (Optional | to further verify): Provide a config in OperatorConfiguration for scheduler backend to decide its' internal behavior. For example, if it is the kube-scheduler and GangScheduling has been disabled then do not create Workload Objects. 
+* **kube-scheduler backend is always enabled and active**.
+* Have a provision in OperatorConfiguration to set a default scheduler. Default this field to `kube-scheduler` if not set(since it is always active).
+* When the scheduler-related configuration in OperatorConfiguration is empty (i.e. no additional scheduler backends are configured), only admit PodCliqueSet (PCS) resources whose `schedulerName` is empty or `"default-scheduler"` (kube-scheduler is still the only active backend in that case).
+* Provide a config in OperatorConfiguration for each scheduler profile to decide its internal behavior. For example, if it is the kube-scheduler and GangScheduling has been disabled then do not create Workload Objects. 
 
 ## Design Details
 
@@ -140,13 +145,14 @@ The Scheduler Backend Framework introduces a clean separation between Grove's co
 <img src="assets/scheduler-backend-framework.excalidraw.png" alt="scheduler-backend-framework-architecture" style="zoom:50%;" />
 
 #### Layer 1: Configuration Layer
-User-facing configuration that defines which scheduler backends are active and which is the default:
+User-facing configuration that defines scheduler profiles (which backends are active and which is the default):
 - **OperatorConfiguration**: Add additional scheduler-related configuration fields
 - **Helm Values**: Deployment-time configuration (`config.scheduler`)
 
 #### Layer 2: Grove Control Plane
-Core controllers managing Grove workload lifecycle:
+Core controllers and webhooks managing Grove workload lifecycle:
 - **PodCliqueSet Controller**: Creates PodGang resources, fills PodReferences
+- **PodCliqueSet Validation Webhook**: Admits create/update of PodCliqueSet by calling the resolved backend's `ValidatePodCliqueSet()`
 - **Backend Controller**: Watches PodGang, calls `SyncPodGang()` to create scheduler CRs
 - **PodClique Controller**: Creates Pods, calls `PreparePod()` to configure scheduler settings
 - **Resources**: PodGang (with Initialized condition) and Pod (with schedulerName/gates)
@@ -155,7 +161,7 @@ Core controllers managing Grove workload lifecycle:
 Abstraction layer bridging Grove and specific schedulers:
 - **Backend Manager**: Singleton that initializes and provides access to active backend
 - **KAI Backend**: Implementation for KAI scheduler (creates PodGroup CRs in future)
-- **Kube Backend**: Minimal implementation for default scheduler (no custom CRs)
+- **Kube Backend**: Minimal implementation for default kube-scheduler (no custom CRs)
 
 #### Layer 4: Scheduler Layer
 Kubernetes schedulers that actually place pods:
@@ -166,9 +172,10 @@ Kubernetes schedulers that actually place pods:
 
 The framework orchestrates workload scheduling through a coordinated flow between layers:
 1. **Backend Initialization**: Operator startup initializes the configured scheduler backend via Backend Manager
-2. **PodGang Creation**: PodCliqueSet Controller creates PodGang resources with `Initialized=False` condition, triggering Backend Controller to create scheduler-specific resources via `SyncPodGang()`
-3. **Pod Configuration**: PodClique Controller creates Pods with scheduling gates, calling `PreparePod()` to inject scheduler-specific settings
-4. **Scheduling Activation**: Once all pods exist and PodReferences are populated, the `Initialized` condition is set to `True`, gates are removed, and scheduling begins
+2. **PCS Admission**: On PodCliqueSet create or update, the validation webhook resolves the backend (from `schedulerName` or default) and calls `ValidatePodCliqueSet()`; the request is admitted or rejected accordingly
+3. **PodGang Creation**: PodCliqueSet Controller creates PodGang resources with `Initialized=False` condition, triggering Backend Controller to create scheduler-specific resources via `SyncPodGang()`
+4. **Pod Configuration**: PodClique Controller creates Pods with scheduling gates, calling `PreparePod()` to inject scheduler-specific settings
+5. **Scheduling Activation**: Once all pods exist and PodReferences are populated, the `Initialized` condition is set to `True`, gates are removed, and scheduling begins
 
 For detailed lifecycle flow, see [PodGang Lifecycle Changes](#podgang-lifecycle-changes).
 
@@ -180,8 +187,8 @@ The core of the framework is the `SchedulerBackend` interface, which defines all
 
 // SchedulerBackend defines the interface that different scheduler backends must implement.
 //
-// Architecture: Backend converts PodGang to scheduler-specific CR (PodGroup/Workload/etc)
-// and prepares Pods with scheduler-specific configurations.
+// Architecture: Backend validates PodCliqueSet at admission, converts
+// PodGang to scheduler-specific CR (PodGroup/Workload/etc), and prepares Pods with scheduler-specific configurations.
 type SchedulerBackend interface {
 	// Name is a unique name of the scheduler backend.
 	// Used for logging and identification purposes.
@@ -214,6 +221,13 @@ type SchedulerBackend interface {
 	// annotations, etc.
 	// This is called during Pod creation in the PodClique controller.
 	PreparePod(pod *corev1.Pod)
+
+	// ValidatePodCliqueSet validates a PodCliqueSet for this scheduler backend.
+	// Called by the PodCliqueSet validation webhook (create and update). Backends can perform
+	// scheduler-specific validation (e.g. that the requested schedulerName is enabled,
+	// that requested features are supported, capacity limits). Return nil to allow, or an error
+	// to reject the request (the error message is returned to the client).
+	ValidatePodCliqueSet(ctx context.Context, pcs *groveschedulerv1alpha1.PodCliqueSet) error
 }
 ```
 
@@ -221,35 +235,31 @@ type SchedulerBackend interface {
 
 ### Backend Manager
 
-The manager initializes the set of enabled scheduler backends from OperatorConfiguration and provides access by name and a default:
+The manager initializes scheduler backends: the kube-scheduler backend is always created and active; additional backends are created from OperatorConfiguration profiles. It provides access by name and a default:
 
 ```go
 
-// Initialize creates and registers backend instances for each entry in config.Enabled.
-// config.Default is the backend to use when a workload does not specify one (empty or "default-scheduler" → kube-scheduler backend).
+// Initialize creates and registers backend instances: kube-scheduler is always registered;
+// backends named in config.Profiles are also registered (profiles can include or omit kube-scheduler).
 // Called once during operator startup before controllers start.
 func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder record.EventRecorder, config SchedulerConfiguration) error
 
-// Get returns the backend for the given name. Returns nil if that backend is not enabled.
+// Get returns the backend for the given name. kube-scheduler is always available; other backends return nil if not enabled via a profile.
 func Get(name string) SchedulerBackend
 
-// GetDefault returns the default backend (from config.Name). Returns nil if not initialized.
+// GetDefault returns the default backend (the profile with default: true, or kube-scheduler if no profile is default).
 func GetDefault() SchedulerBackend
 
-// PreparePod is a convenience that calls PreparePod on the default backend (or the backend implied by the pod/workload).
-func PreparePod(pod *corev1.Pod) error
 ```
 
-**Design Rationale:**
-
-- **Registry by name**: When multiple backends are enabled, controllers resolve the backend by name (e.g. from workload spec or default from config).
-- **Single default**: `Default` in config selects which backend is used when no backend is specified (empty or `"kube-scheduler"` → kube-scheduler backend).
-- **Initialization Safety**: All enabled backends are created once at startup; lookup is read-only thereafter.
-- **Explicit Backend Imports**: All backend implementations are built into the operator binary (compiled in); they are not loaded as plugins at runtime. The `enabled` list only controls which of these built-in backends are initialized.
 
 ### OperatorConfiguration Extension
 
-The OperatorConfiguration is extended with a `scheduler` block: `enabled` lists each enabled backend with its optional `schedulerConfig`; `default` selects which backend is used when a workload does not specify one. If `default` is empty or `"kube-scheduler"`, the kube-scheduler backend is used.
+The OperatorConfiguration is extended with a `scheduler` block: `profiles` lists scheduler profiles (each with `name`, optional `config`, and `default`). **The kube-scheduler backend is always enabled and active**, regardless of whether it appears in `profiles`. Kube-scheduler may also be listed in `profiles` with custom configuration (e.g. per-backend options), same as other backends.
+
+Profiles are used to enable other backends (e.g. kai-scheduler), to give kube-scheduler optional custom config when listed, and to choose which profile is the default (exactly one profile should have `default: true`). The profile with `default: true` is used when a workload does not specify a scheduler. If no profile has `default: true`, kube-scheduler is used as the default (since it is always active).
+
+**When `profiles` is empty:** If `scheduler.profiles` is explicitly set to an empty list, only the kube-scheduler backend is active (it is always active). In this case, only admit PodCliqueSet resources whose `schedulerName` is empty or `"default-scheduler"`; reject (do not admit) PCS that specify any other scheduler name.
 
 **API shape:**
 
@@ -267,36 +277,33 @@ type OperatorConfiguration struct {
 	// ... other existing fields ...
 }
 
-// SchedulerConfiguration configures which scheduler backends are active and which is the default.
+// SchedulerConfiguration configures scheduler profiles and which is the default.
 type SchedulerConfiguration struct {
-	// Enabled is the list of scheduler backends enabled in this Grove instance. Each entry has a backend name and optional schedulerConfig.
-	// Valid backend names: "kube-scheduler", "kai-scheduler". Order is insignificant.
-	// If empty or unset, defaults to a single entry: [{ name: "kube-scheduler" }].
+	// Profiles is the list of scheduler profiles. Each profile has a backend name, optional config, and whether it is the default.
+	// The kube-scheduler backend is always enabled and active even if not listed here. Listing "kube-scheduler" in profiles
+	// only adds a profile (e.g. with config like GangScheduling: false) and allows marking it as default.
+	// Valid backend names: "kube-scheduler", "kai-scheduler". Exactly one profile should have default: true; if none, kube-scheduler is the default.
 	// +optional
-	Enabled []BackendEntry `json:"enabled,omitempty"`
-
-	// Default is the scheduler backend used when a workload does not specify one. Must be one of the names in Enabled.
-	// If empty or "kube-scheduler", the kube-scheduler backend is used.
-	// +kubebuilder:validation:Enum=kai-scheduler;kube-scheduler
-	// +optional
-	Default string `json:"default,omitempty"`
+	Profiles []SchedulerProfile `json:"profiles,omitempty"`
 }
 
-// BackendEntry pairs an enabled backend name with its optional backend-specific config.
-// SchedulerConfig is deserialized at runtime into the type that backs the given Name (see backend config types below).
-// This is interface-like: adding a new scheduler backend does not require changing this struct.
-type BackendEntry struct {
+// SchedulerProfile defines a scheduler backend profile with optional backend-specific config and default flag.
+type SchedulerProfile struct {
 	// Name is the scheduler backend name. Valid values: "kube-scheduler", "kai-scheduler".
 	// +kubebuilder:validation:Enum=kai-scheduler;kube-scheduler
 	Name string `json:"name"`
 
-	// SchedulerConfig holds backend-specific options. The operator unmarshals it into the config type for this backend (see backend config types below).
+	// Config holds backend-specific options. The operator unmarshals it into the config type for this backend (see backend config types below).
 	// +optional
-	SchedulerConfig *runtime.RawExtension `json:"schedulerConfig,omitempty"`
+	Config *runtime.RawExtension `json:"config,omitempty"`
+
+	// Default indicates this profile is the default scheduler when a workload does not specify one. Exactly one profile should have default: true.
+	// +optional
+	Default bool `json:"default,omitempty"`
 }
 ```
 
-The operator unmarshals `BackendEntry.SchedulerConfig` into the config type for that backend name (see below). New backends register their config type without changing `BackendEntry` (interface-style).
+The operator unmarshals `SchedulerProfile.Config` into the config type for that backend name (see below). New backends register their config type without changing `SchedulerProfile`.
 
 **Backend config types (per-backend)**
 
@@ -305,116 +312,88 @@ The operator unmarshals `BackendEntry.SchedulerConfig` into the config type for 
 type KubeSchedulerConfig struct {
 	// GangScheduling enables or disables gang-scheduling behavior (e.g. Workload API). If false, the backend does not create Workload objects.
 	// +optional
-	GangScheduling *bool `json:"gangScheduling,omitempty"`
+	GangScheduling *bool `json:"GangScheduling,omitempty"`
 }
-
-// KAISchedulerConfig is the config type for the "kai-scheduler" backend (reserved for future use).
-type KAISchedulerConfig struct{}
 ```
 
-**How `enabled` and `schedulerConfig` relate**
+**How `profiles` and `config` relate**
 
-Each item in `scheduler.enabled` has a `name` (which backend is enabled) and an optional `schedulerConfig` (that backend's options). The operator deserializes `schedulerConfig` into the type for that backend: for `"kube-scheduler"` → `KubeSchedulerConfig`, for `"kai-scheduler"` → `KAISchedulerConfig`. The config shape is thus per-backend (interface-style); no central struct lists all backends.
+Each item in `scheduler.profiles` has a `name` (which backend), an optional `config` (that backend's options), and `default` (whether it is the default). The operator deserializes `config` into the type for that backend: for `"kube-scheduler"` → `KubeSchedulerConfig`. The config shape is thus per-backend.
 
 **Configuration options and ways to configure**
 
 | Goal | How to configure |
 |------|-------------------|
-| Single backend: use kube-scheduler only (no extra options) | Omit `scheduler` or set `scheduler.enabled: [{ name: "kube-scheduler" }]`. `default` empty or `"default-scheduler"` uses kube-scheduler backend. |
-| Single backend: use kube-scheduler and tune its behavior | One entry in `enabled`: `name: "kube-scheduler"`, `schedulerConfig: { gangScheduling: false }` (KubeSchedulerConfig fields). |
-| Single backend: use KAI only | `scheduler.enabled: [{ name: "kai-scheduler", schedulerConfig: {} }]`, `scheduler.default: "kai-scheduler"`. |
-| **Multiple active backends** | Add one `enabled` entry per backend; each entry has `name` and optional `schedulerConfig` (backend-specific). Set `scheduler.default` to the backend to use when a workload does not specify one (empty or `"kube-scheduler"` → kube-scheduler backend). |
+| Use kube-scheduler only (no extra options) | Omit `scheduler` or set `scheduler.profiles: []`. kube-scheduler is always active and is the default. |
+| Use kube-scheduler and tune its behavior | One profile: `name: "kube-scheduler"`, `config: { GangScheduling: true }`, `default: true`. |
+| Use KAI as default | `scheduler.profiles: [{ name: "kai-scheduler", config: {}, default: true }]`. kube-scheduler remains active; default is kai-scheduler. |
+| **Multiple backends, kube-scheduler default** | Add profiles for each; e.g. kube-scheduler (with optional config) and kai-scheduler; set `default: true` on kube-scheduler profile. |
 
 **Example YAML (OperatorConfiguration / Helm `config`):**
 
 ```yaml
 # --- Style 1: Omit scheduler (all defaults) ---
-# Same as enabled: [{ name: "kube-scheduler" }]; default empty or "kube-scheduler" → kube-scheduler backend
+# Same as profiles: [{ name: "kube-scheduler", default: true }]
 # (scheduler block can be omitted entirely)
 ```
 
 ```yaml
 # --- Style 2: Single backend, no backend-specific options ---
 scheduler:
-  enabled:
+  profiles:
     - name: "kube-scheduler"
-  default: "kube-scheduler"   # if empty or "default-scheduler", we use kube-scheduler backend
+      default: true
 ```
 
 ```yaml
-# --- Style 3: Single backend with backend-specific options (schedulerConfig = KubeSchedulerConfig) ---
+# --- Style 3: Single backend with backend-specific options (config = KubeSchedulerConfig) ---
 scheduler:
-  enabled:
+  profiles:
     - name: "kube-scheduler"
-      schedulerConfig:
-        gangScheduling: false
-  default: "kube-scheduler"
+      config:
+        GangScheduling: true
+      default: true
 ```
 
 ```yaml
 # --- Style 4: Multiple backends; default is kube-scheduler ---
 scheduler:
-  enabled:
+  profiles:
     - name: "kube-scheduler"
-      schedulerConfig:
-        gangScheduling: false
+      config:
+        GangScheduling: false
+      default: true
     - name: "kai-scheduler"
-      schedulerConfig: {}
-  default: "kube-scheduler"   # if empty or "default-scheduler", we use kube-scheduler backend
+      config: {}
 ```
 
 ```yaml
 # --- Style 5: Multiple backends; default is kai-scheduler ---
 scheduler:
-  enabled:
+  profiles:
     - name: "kube-scheduler"
-      schedulerConfig:
-        gangScheduling: false
+      config:
+        GangScheduling: false
     - name: "kai-scheduler"
-      schedulerConfig: {}
-  default: "kai-scheduler"
+      config: {}
+      default: true
 ```
 
 ```yaml
-# --- Style 6: Only KAI enabled ---
+# --- Style 6: Only KAI profile, but kube-scheduler is also active even if not set in profiles --- 
 scheduler:
-  enabled:
+  profiles:
     - name: "kai-scheduler"
-      schedulerConfig: {}
-  default: "kai-scheduler"
+      config: {}
+      default: true
 ```
 
-**Helm Chart Configuration:**
-
-The Helm chart `values.yaml` mirrors the same structure under `config`:
-
-```yaml
-config:
-  controllers:
-    podCliqueSet:
-      concurrentSyncs: 3
-    podClique:
-      concurrentSyncs: 3
-  # Scheduler: enabled (each name + optional schedulerConfig); default = backend when workload does not specify (empty or "default-scheduler" → kube-scheduler).
-  scheduler:
-    enabled:
-      - name: "kube-scheduler"
-        schedulerConfig:
-          gangScheduling: false
-      # - name: "kai-scheduler"
-      #   schedulerConfig: {}
-    default: "kube-scheduler"   # if empty or "default-scheduler", we use kube-scheduler backend
-  logLevel: info
-  logFormat: json
-  topologyAwareScheduling:
-    enabled: false
-```
 
 **Phase 1 vs Phase 2:**
 
-- **Phase 1** (Current): Both KAI and Kube backends have minimal no-op implementations. All backend interface methods (`Init`, `SyncPodGang`, `OnPodGangDelete`, `PreparePod`) return immediately without creating any scheduler-specific resources. KAI scheduler continues to read PodGang CRs directly. This phase focuses on establishing the framework infrastructure and interfaces.
+- **Phase 1** (Current): Both KAI and Kube backends have minimal no-op implementations. All backend interface methods (`Init`, `SyncPodGang`, `OnPodGangDelete`, `PreparePod`, `ValidatePodCliqueSet`) return immediately without creating any scheduler-specific resources. KAI scheduler continues to read PodGang CRs directly. This phase focuses on establishing the framework infrastructure and interfaces.
 - **Phase 2** (Future):
-  - **KAI Backend**: Will implement `SyncPodGang` to create PodGroup CRs, providing cleaner separation and allowing KAI scheduler modifications to be minimized.
+  - **KAI Backend**: All PodGang-related management and KAI’s own CR (e.g. PodGroup) management will be moved into the KAI backend. The backend will implement scheduler backend interfaces to create update KAI CRs, providing cleaner separation and allowing KAI scheduler modifications to be minimized.
   - **Kube Backend**: Will support advanced community features as they become available, including Workload API for gang scheduling and other emerging Kubernetes scheduling capabilities. The backend will translate PodGang specifications to the appropriate Kubernetes-native scheduling primitives.
 
 
@@ -456,10 +435,10 @@ A dedicated Backend Controller watches PodGang resources and invokes backend hoo
 
 ```go
 // Reconcile processes PodGang changes and synchronizes to backend-specific CRs.
-func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *BackendReconciler) SetupWithManager(mgr ctrl.Manager) error 
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error 
 ```
 
 ### Monitoring
@@ -490,6 +469,12 @@ Unit tests will be implemented for all framework related components:
 **KAI Backend Implementation** (`operator/internal/schedulerBackend/kai/`)
 - Test pod spec mutation
 - Test configuration validation
+- Test ValidatePodCliqueSet (allow when valid, reject when scheduler-specific rules fail)
+
+**Kube-scheduler Backend Implementation** (`operator/internal/schedulerBackend/kube/`)
+- Test pod spec mutation
+- Test configuration validation
+- Test ValidatePodCliqueSet (allow when valid, reject when scheduler-specific rules fail)
 
 **Controller Integration** (`operator/internal/controller/podcliqueset/`)
 - Test PodGang creation with empty pods references

@@ -153,7 +153,7 @@ User-facing configuration that defines scheduler profiles (which backends are ac
 Core controllers and webhooks managing Grove workload lifecycle:
 - **PodCliqueSet Controller**: Creates PodGang resources, fills PodReferences
 - **PodCliqueSet Validation Webhook**: Admits create/update of PodCliqueSet by calling the resolved backend's `ValidatePodCliqueSet()`
-- **Backend Controller**: Watches PodGang, calls `SyncPodGang()` to create scheduler CRs
+- **Backend Controller**: Watches PodGang, calls `SchedulerBackend.SyncPodGang()` to creates scheduler specific CRs if needed.
 - **PodClique Controller**: Creates Pods, calls `PreparePod()` to configure scheduler settings
 - **Resources**: PodGang (with Initialized condition) and Pod (with schedulerName/gates)
 

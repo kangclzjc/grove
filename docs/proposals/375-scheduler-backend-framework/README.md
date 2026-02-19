@@ -4,6 +4,7 @@
 - [Summary](#summary)
 - [Motivation](#motivation)
   - [Goals](#goals)
+  - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
   - [User Stories](#user-stories)
     - [Story 1: Third-Party Scheduler Integration](#story-1-third-party-scheduler-integration)
@@ -19,13 +20,14 @@
     - [Layer 2: Grove Control Plane](#layer-2-grove-control-plane)
     - [Layer 3: Scheduler Backend Layer](#layer-3-scheduler-backend-layer)
     - [Layer 4: Scheduler Layer](#layer-4-scheduler-layer)
-  - [Backend Interface Definition](#backend-interface-definition)
+  - [Scheduler Backend Interface](#scheduler-backend-interface)
   - [Backend Manager](#backend-manager)
   - [OperatorConfiguration Extension](#operatorconfiguration-extension)
   - [PodGang Lifecycle Changes](#podgang-lifecycle-changes)
     - [Previous Flow (Before Framework):](#previous-flow-before-framework)
-    - [New Flow (With Framework):](#new-flow-with-framework)
-    - [New PodGang Status Condition](#new-podgang-status-condition)
+    - [Revised PodGang Creation Flow](#revised-podgang-creation-flow)
+      - [PodGang API enhancements](#podgang-api-enhancements)
+      - [Creation Flow](#creation-flow)
   - [Backend Controller](#backend-controller)
   - [Monitoring](#monitoring)
     - [Status Conditions](#status-conditions)
@@ -73,6 +75,11 @@ In summary, refining Grove and introducing a Scheduler Backend Framework is both
 * **Enable Custom Resource Management**: Provide interfaces that allow Scheduler Backends to create, update, and delete their own custom resources in response to PodGang lifecycle events (create, update, delete, status changes).
 * **Simplify Configuration and Selection**: Allow admins to configure scheduler backends during Grove installation via OperatorConfiguration. By default, the configured default backend is used; otherwise the workload can specify a scheduler backend (e.g. via `schedulerName` in the pod spec).
 * **Multiple Backends and Dynamic Selection**: Provide clear mechanisms for backend registration and initialization, built-in support for multiple scheduler backends (e.g. Kubernetes kube-scheduler and kai-scheduler), and a clear path for third-party schedulers. At runtime, Grove selects the backend per workload from OperatorConfiguration and the workload's `schedulerName` in the pod spec.
+
+### Non-Goals
+
+* **Cluster topology and multi-cluster scheduling**: This GREP does not define or support cluster topology (e.g. multi-cluster topology) in the scheduler backend interface. Addressing those concerns may require additional extension points or interface methods in a future proposal and is out of scope here.
+* **PodReferences definition and semantics**: Redefining or formally specifying the existing `PodReferences` field (e.g. structure, ownership, and how it is populated) is out of scope. This proposal relies on current behavior and may be updated in a follow-up if that is clarified elsewhere.
 
 ## Proposal
 
@@ -162,9 +169,7 @@ Abstraction layer bridging Grove and specific schedulers:
 - **Kube backend**: Minimal implementation for the kube-scheduler (no custom CRs)
 
 #### Layer 4: Scheduler Layer
-Kubernetes schedulers that actually place pods:
-- **kai-scheduler**: Gang scheduling with topology awareness
-- **kube-scheduler**: Default Kubernetes scheduler
+Kubernetes schedulers that actually place pods. The backend schedulers in this layer (e.g. kai-scheduler, kube-scheduler) are responsible for providing supporting features such as gang scheduling, topology-aware packing, gang preemption, and the like; the exact feature set depends on each scheduler.
 
 **Key Data Flow:**
 
@@ -177,7 +182,7 @@ The framework orchestrates workload scheduling through a coordinated flow betwee
 
 For detailed lifecycle flow, see [PodGang Lifecycle Changes](#podgang-lifecycle-changes).
 
-### Backend Interface Definition
+### Scheduler Backend Interface
 
 The core of the framework is the `SchedulerBackend` interface, which defines all operations that a scheduler backend must implement. The interface is intentionally simple and focused:
 
@@ -220,19 +225,17 @@ type SchedulerBackend interface {
 	// This is called during Pod creation in the PodClique controller.
 	PreparePod(pod *corev1.Pod)
 
-	// ValidatePodCliqueSet validates a PodCliqueSet for this scheduler backend.
-	// Called by the PodCliqueSet validation webhook (create and update). Backends can perform
-	// that requested features are supported, capacity limits). Return nil to allow, or an error
-	// to reject the request (the error message is returned to the client).
+    // ValidatePodCliqueSet provides an ability to the scheduler backends to run additional
+    // validations on the PodCliqueSet resource. For example - if a scheduler does not yet support
+    // topology aware placements and if the PodCliqueSet has defined required topology pack constraints
+    // then it can choose to reject the PodCliqueSet by returning an error. 
 	ValidatePodCliqueSet(ctx context.Context, pcs *groveschedulerv1alpha1.PodCliqueSet) error
 }
 ```
 
-**Future note:** Cluster topology (e.g. multi-cluster topology support) may require its own extension point or additional methods on this interface; the interface is expected to evolve as those needs are clarified.
-
 ### Backend Manager
 
-The manager initializes scheduler backends: the kube-scheduler backend is always created and active; additional backends are created from OperatorConfiguration profiles. It provides access by name and a default:
+The manager initializes the **enabled** scheduler backends (as defined in OperatorConfiguration: the kube-scheduler backend is always enabled; other backends are enabled via profiles). The manager provides access by backend name and exposes whichever backend OperatorConfiguration designates as the default:
 
 ```go
 
@@ -244,7 +247,7 @@ func Initialize(client client.Client, scheme *runtime.Scheme, eventRecorder reco
 // Get returns the backend for the given name. kube-scheduler is always available; other backends return nil if not enabled via a profile.
 func Get(name string) SchedulerBackend
 
-// GetDefault returns the default backend (the profile with default: true, or kube-scheduler if no profile is default).
+// GetDefault returns the backend designated as default in OperatorConfiguration (the profile with default: true; if none, kube-scheduler). The manager does not define the default; it exposes the one from config.
 func GetDefault() SchedulerBackend
 
 ```
@@ -301,6 +304,8 @@ type SchedulerProfile struct {
 ```
 
 The operator unmarshals `SchedulerProfile.Config` into the config type for that backend name (see below). New backends register their config type without changing `SchedulerProfile`.
+
+When `GangScheduling` is enabled in `KubeSchedulerConfig`, the cluster's kube-scheduler is expected to support gang scheduling (e.g. via the Workload API). Grove then creates Workload objects so the Kube backend can use that capability.
 
 **Backend config types (per-backend)**
 
@@ -359,7 +364,7 @@ scheduler:
   profiles:
     - name: "kube-scheduler"
       config:
-        GangScheduling: false
+        GangScheduling: true
       default: true
     - name: "kai-scheduler"
       config: {}
@@ -371,7 +376,7 @@ scheduler:
   profiles:
     - name: "kube-scheduler"
       config:
-        GangScheduling: false
+        GangScheduling: true
     - name: "kai-scheduler"
       config: {}
       default: true
@@ -393,7 +398,7 @@ scheduler:
   - **KAI Backend**: Full implementation—all PodGang-related management and kai-scheduler’s own CR (e.g. PodGroup) management are in the KAI backend. The backend implements the scheduler backend interface to create and update KAI CRs, providing clean separation and allowing kai-scheduler modifications to be minimized.
   - **Kube Backend**: Minimal no-op implementation. All backend interface methods (`Init`, `SyncPodGang`, `OnPodGangDelete`, `PreparePod`, `ValidatePodCliqueSet`) return immediately without creating any scheduler-specific resources.
 - **Phase 2** (Future):
-  - **Kube Backend**: Will support advanced community features as they become available, including Workload API for gang scheduling and other emerging Kubernetes scheduling capabilities. The backend will translate PodGang specifications to the appropriate Kubernetes-native scheduling primitives.
+  - **Kube Backend**: Will support advanced community features as they become available, including `Workload` API for gang scheduling and other emerging Kubernetes scheduling capabilities. The backend will translate PodGang specifications to the appropriate Kubernetes-native scheduling primitives. 
 
 
 ### PodGang Lifecycle Changes
@@ -405,14 +410,11 @@ scheduler:
 2. Wait for all pods to have back-references to PodGang
 3. Create PodGang with complete PodReferences
 
-#### New Flow (With Framework):
-1. **Create PodGang early** with PodGroups having empty PodReferences and `Initialized=False`.
-2. **Backend creates scheduler-specific CRs**: The Backend Controller reconciles the new PodGang and calls `SyncPodGang()` on the resolved backend. The backend creates or updates its scheduler-specific resources (e.g. PodGroup for kai-scheduler, Workload for kube-scheduler when supported). These CRs must exist before pods are allowed to be scheduled so the scheduler can enforce gang/topology semantics.
-3. **Create Pods** (with scheduling gates to block scheduling). Pod creation may call `PreparePod()` to inject scheduler-specific settings (e.g. `schedulerName`, annotations).
-4. **Update PodGang** with PodReferences once all pods are created, and set `Initialized=True`.
-5. **Scheduling gates removed** to allow pods to be scheduled. The scheduler uses the backend-created CRs (PodGroup/Workload) when placing pods.
+#### Revised PodGang Creation Flow
+To understand the new `PodGang` creation flow, we first introduce the enhancements made to the `PodGangStatus`.
 
-#### New PodGang Status Condition
+##### PodGang API enhancements
+A new `metav1.Condition` has been introduced for `PodGang`.
 
 ```go
 const (
@@ -422,12 +424,20 @@ const (
 )
 ```
 
-We introduce Initialized as new PodGang Status Condition to signal that:
-- All expected pods have been created
-- PodGang.Spec.PodGroups[].PodReferences have been populated
-- Pods can now lift their scheduling gates and proceed with scheduling
+A `PodGang` is considered as `Initialized` when:
 
-**Future note:** The existing definition and semantics of the `PodReferences` field (e.g. structure, ownership, and how it is populated) may need to be discussed and documented in a follow-up; this proposal assumes current behavior and may be updated as that is clarified.
+* All constituent Pods are created.
+* Pods back-reference to their PodGang via a grove.io/podgang label.
+* PodGang.Spec.PodGroups have PodReferences fully populated.
+
+> NOTE: Field PodReferences in PodGang.Spec.PodGroups is subject to change. If it does then this GREP will need to be updated accordingly.
+
+##### Creation Flow
+1. **Create PodGang early** with PodGroups having empty PodReferences and `Initialized=False`.
+2. **Backend creates scheduler-specific CRs**: The Backend Controller reconciles the new PodGang and calls `SyncPodGang()` on the resolved backend. The backend creates or updates its scheduler-specific resources (e.g. PodGroup for kai-scheduler, Workload for kube-scheduler when supported). These CRs must exist before pods are allowed to be scheduled so the scheduler can enforce gang/topology semantics.
+3. **Create Pods** (with scheduling gates to block scheduling). Pod creation may call `PreparePod()` to inject scheduler-specific settings (e.g. `schedulerName`, annotations).
+4. **Update PodGang** with PodReferences once all pods are created, and set `Initialized=True`.
+5. **Scheduling gates removed** to allow pods to be scheduled. The scheduler uses the backend-created CRs (PodGroup/Workload) when placing pods.
 
 ### Backend Controller
 
@@ -450,51 +460,32 @@ A new condition will be added to the Grove operator's status:
 Condition: `Initialized`
 Condition States:
 
-| Status    | Reason                              | Description                                                  |
-| --------- | ----------------------------------- | ------------------------------------------------------------ |
-| `True`    | `AllPodsCreated`  | All pods have been created and references populated |
-| `False`   | `PodsNotCreated` | Waiting for all pods to be created and wait for all pods references to be filled in PodGang|
+| Status    | Reason            | Description                                                                 |
+| --------- | ----------------- | --------------------------------------------------------------------------- |
+| `True`    | `Ready`           | All constituent pods are created, pods back-reference this PodGang, and `PodGang.Spec.PodGroups` have `PodReferences` fully populated. |
+| `False`   | `PodsPending`     | Not all constituent pods have been created yet.                             |
+| `False`   | `RefsSyncing`     | Pods exist but references are not yet complete: either pods do not yet back-reference this PodGang, or `PodGang.Spec.PodGroups[].PodReferences` are not yet fully populated. |
 
 
 ### Test Plan
 
 #### Unit Tests
 
-Unit tests will be implemented for all framework related components:
-
-**Backend Interface and Registry** (`operator/internal/schedulerBackend/`)
-- Test backend registration (success, duplicate registration)
-- Test backend retrieval (existing, non-existing)
-
-**KAI Backend Implementation** (`operator/internal/schedulerBackend/kai/`)
-- Test pod spec mutation
-- Test configuration validation
-- Test ValidatePodCliqueSet (allow when valid, reject when scheduler-specific rules fail)
-
-**Kube Backend Implementation** (`operator/internal/schedulerBackend/kube/`)
-- Test pod spec mutation
-- Test configuration validation
-- Test ValidatePodCliqueSet (allow when valid, reject when scheduler-specific rules fail)
-
-**Controller Integration** (`operator/internal/controller/podcliqueset/`)
-- Test PodGang creation with empty pods references
-- Test PodGang update with filling pods references
-
-**Controller Integration** (`operator/internal/controller/podclique/`)
-- Test backend errors and failure handling
-- Test pod creation with backend mutation
-- Test lift schedulingGate after Initialized is true
-
-**OperatorConfiguration** (`operator/api/config/v1alpha1/`)
-- Test configuration validation
-- Test backend configuration parsing
-- Test default values
-- Test invalid backend names
+Unit tests will cover the main framework areas: backend interface and registry behavior, each backend implementation’s contract (e.g. `PreparePod`, `ValidatePodCliqueSet`), controller integration with backend hooks (PodGang lifecycle, pod creation and scheduling gates), and OperatorConfiguration parsing and defaulting. 
 
 
 #### E2E Tests
 
-All existing e2e tests should be passed based on all supported schedulers.
+Today, E2E tests assume a single scheduler backend (e.g. KAI) and there is no way to configure which backend the test environment uses. The following changes are needed to align with this design and to run all E2E tests with the kai-scheduler:
+
+1. **Make the scheduler backend configurable in E2E**
+   The E2E harness (cluster bring-up, operator deployment) must supply [OperatorConfiguration](#operatorconfiguration-extension) so that the operator runs with the desired backend(s).
+
+2. **Configure E2E to use kai-scheduler so all tests pass**
+   To run the existing E2E suite (which assumes KAI behavior) and have all tests pass, the test environment must deploy the operator with OperatorConfiguration that enables kai-scheduler and sets it as the default.
+
+3. **Scope of E2E**
+   Once the backend is configurable, existing E2E tests should pass with the configured backend (kai-scheduler for the current suite). The test plan should also cover running against other supported backends where feasible.
 
 
 ### Graduation Criteria
@@ -505,10 +496,12 @@ The Scheduler Backend Framework will follow a staged rollout approach:
 - Core backend interface defined and implemented
 - Backend registry functional
 - Basic operator configuration support
+- KAI backend and kube backend both supported and configurable via OperatorConfiguration
 
 #### Beta 
 - Backend interface stabilized (no breaking changes expected)
 - Documentation for third-party backend development
+- Kube backend support for advanced community features (e.g. Workload API for gang scheduling) as they become available in Kubernetes
 
 #### GA
 - Backend interface is stable and versioned

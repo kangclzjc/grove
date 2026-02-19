@@ -160,7 +160,7 @@ Core controllers and webhooks managing Grove workload lifecycle:
 #### Layer 3: Scheduler Backend Layer
 Abstraction layer bridging Grove and specific schedulers:
 - **Backend Manager**: Singleton that initializes and provides access to active backend
-- **KAI Backend**: Implementation for KAI scheduler (creates PodGroup CRs in future)
+- **KAI Backend**: Implementation for KAI scheduler (maps PodGang resources to PodGroup custom resource(s))
 - **Kube Backend**: Minimal implementation for default kube-scheduler (no custom CRs)
 
 #### Layer 4: Scheduler Layer

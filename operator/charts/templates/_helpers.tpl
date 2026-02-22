@@ -28,14 +28,17 @@ config.yaml: |
       concurrentSyncs: {{ .Values.config.controllers.podCliqueSet.concurrentSyncs }}
     podClique:
       concurrentSyncs: {{ .Values.config.controllers.podClique.concurrentSyncs }}
-  {{- if .Values.config.scheduler }}
+  {{- if .Values.config.scheduler.profiles }}
   scheduler:
-    name: {{ .Values.config.scheduler.name }}
-    {{- if .Values.config.scheduler.kai }}
-    kai: {{ toYaml .Values.config.scheduler.kai | nindent 4 }}
-    {{- end }}
-    {{- if .Values.config.scheduler.defaultScheduler }}
-    defaultScheduler: {{ toYaml .Values.config.scheduler.defaultScheduler | nindent 4 }}
+    profiles:
+    {{- range .Values.config.scheduler.profiles }}
+    - name: {{ .name }}
+      {{- if hasKey . "default" }}
+      default: {{ .default }}
+      {{- end }}
+      {{- if hasKey . "config" }}
+      config: {{ toYaml .config | nindent 4 }}
+      {{- end }}
     {{- end }}
   {{- end }}
   {{- if .Values.config.debugging }}

@@ -88,8 +88,7 @@ config:
       - name: kube-scheduler
         default: true
         # config: { gangScheduling: false }  # optional
-      # - name: kai-scheduler
-      #   config: {}
+      - name: kai-scheduler
   logLevel: info
   logFormat: json
   topologyAwareScheduling:

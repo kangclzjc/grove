@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/NVIDIA/KAI-scheduler v0.12.0
 	github.com/ai-dynamo/grove/operator/api v0.0.0
+	github.com/ai-dynamo/grove/operator/client v0.0.0-00010101000000-000000000000
 	github.com/ai-dynamo/grove/scheduler/api v0.0.0
 	github.com/docker/docker v28.3.3+incompatible
 	github.com/go-logr/logr v1.4.3

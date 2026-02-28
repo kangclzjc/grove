@@ -144,9 +144,13 @@ func (v *pcsValidator) validatePodCliqueTemplates(fldPath *field.Path) ([]string
 	allErrs = append(allErrs, sliceMustHaveUniqueElements(cliqueRoles, fldPath.Child("roleName"), "cliqueTemplateSpec.Spec roleNames must be unique")...)
 
 	// Validate scheduler names: all must be the same
+	// When schedulerName is empty, use the default backend's name from schedulerbackend.
 	uniqueSchedulerNames := lo.Uniq(lo.Map(schedulerNames, func(item string, _ int) string {
 		if item == "" {
-			return "default-scheduler"
+			if def := schedulerbackend.GetDefault(); def != nil {
+				return def.Name()
+			}
+			return "default-scheduler" // fallback when backend not initialized (e.g. in tests)
 		}
 		return item
 	}))

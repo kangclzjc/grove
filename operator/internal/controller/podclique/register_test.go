@@ -20,17 +20,15 @@ import (
 	"testing"
 
 	"github.com/ai-dynamo/grove/operator/api/common"
-	"github.com/ai-dynamo/grove/operator/api/common/constants"
 	grovecorev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 	"github.com/ai-dynamo/grove/operator/internal/expect"
+	testutils "github.com/ai-dynamo/grove/operator/test/utils"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
@@ -39,33 +37,6 @@ import (
 func TestControllerConstants(t *testing.T) {
 	// Verifies that controller name is set correctly
 	assert.Equal(t, "podclique-controller", controllerName)
-}
-
-// managedPodWithPodCliqueOwner returns a Pod that isManagedPod() and has a PodClique owner (so the
-// pod predicate will call ObserveDeletions for it). Used to simulate the managed pod deletion scenario:
-// a pending pod is manually deleted; the predicate must lower create expectations so the next reconcile recreates it.
-func managedPodWithPodCliqueOwner(namespace, podName, pclqName string, podUID types.UID) *corev1.Pod {
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: namespace,
-			Name:      podName,
-			UID:       podUID,
-			Labels: map[string]string{
-				common.LabelManagedByKey: common.LabelManagedByValue,
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: grovecorev1alpha1.SchemeGroupVersion.Group + "/" + grovecorev1alpha1.SchemeGroupVersion.Version,
-					Kind:       constants.KindPodClique,
-					Name:       pclqName,
-					UID:        types.UID("pclq-uid"),
-					Controller: ptr.To(true),
-				},
-			},
-		},
-		Spec:   corev1.PodSpec{},
-		Status: corev1.PodStatus{},
-	}
 }
 
 // TestPodPredicate_Delete tests the pod predicate's Delete path for the scenario:
@@ -87,7 +58,11 @@ func TestPodPredicate_Delete(t *testing.T) {
 
 		r := &Reconciler{expectationsStore: store}
 		pred := r.podPredicate()
-		pod := managedPodWithPodCliqueOwner(ns, podName, pclqName, podUID)
+		pod := testutils.NewPodBuilder(podName, ns).
+			WithOwner(pclqName).
+			WithLabels(map[string]string{common.LabelManagedByKey: common.LabelManagedByValue}).
+			Build()
+		pod.UID = podUID
 
 		funcs, ok := pred.(predicate.Funcs)
 		require.True(t, ok, "predicate must be predicate.Funcs")

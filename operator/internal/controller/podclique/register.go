@@ -99,17 +99,6 @@ func managedPodCliquePredicate() predicate.Predicate {
 	}
 }
 
-// recordPodDeletionInExpectations records the pod's deletion in the expectations store for its owning PodClique so the controller can recreate the pod (issue #457).
-func (r *Reconciler) recordPodDeletionInExpectations(pod *corev1.Pod) {
-	if ownerRef := k8sutils.FindOwnerRefByKind(pod.OwnerReferences, constants.KindPodClique); ownerRef != nil {
-		pclqObjMeta := metav1.ObjectMeta{Namespace: pod.Namespace, Name: ownerRef.Name}
-		if controlleeKey, err := expect.ControlleeKeyFunc(&grovecorev1alpha1.PodClique{ObjectMeta: pclqObjMeta}); err == nil {
-			logger := ctrllogger.Log.WithName(controllerName).WithName("pod-predicate")
-			r.expectationsStore.ObserveDeletions(logger, controlleeKey, pod.UID)
-		}
-	}
-}
-
 // podPredicate returns a predicate that filters out pods that are not managed by Grove.
 // On Delete for a managed pod it calls ObserveDeletions so the controller can recreate the pod (issue #457).
 func (r *Reconciler) podPredicate() predicate.Predicate {
@@ -128,6 +117,22 @@ func (r *Reconciler) podPredicate() predicate.Predicate {
 		},
 		GenericFunc: func(_ event.GenericEvent) bool { return false },
 	}
+}
+
+// recordPodDeletionInExpectations records the pod's deletion in the expectations store for its owning PodClique so the controller can recreate the pod (issue #457).
+func (r *Reconciler) recordPodDeletionInExpectations(pod *corev1.Pod) {
+	pclqOwnerRef := k8sutils.FindOwnerRefByKind(pod.OwnerReferences, constants.KindPodClique)
+	if pclqOwnerRef == nil {
+		return // nothing to do
+	}
+	pclqObjMeta := metav1.ObjectMeta{Namespace: pod.Namespace, Name: pclqOwnerRef.Name}
+	controlleeKey, err := expect.ControlleeKeyFunc(&grovecorev1alpha1.PodClique{ObjectMeta: pclqObjMeta})
+	logger := ctrllogger.Log.WithName(controllerName)
+	if err != nil {
+		logger.Error(err, "cannot observe deletion, unable to get controllee key from the expectations store", "pclqNamespace", pclqObjMeta.Namespace, "pclqName", pclqObjMeta.Name)
+		return
+	}
+	r.expectationsStore.ObserveDeletions(logger, controlleeKey, pod.UID)
 }
 
 // hasPodSpecChanged checks if the Pod's spec has changed by comparing generation values

@@ -43,7 +43,7 @@ var (
 	logger *utils.Logger
 
 	// testImages are the Docker images to push to the test registry
-	testImages = []string{"nginx:alpine-slim", "busybox:latest"}
+	testImages = []string{"busybox:latest"}
 )
 
 func init() {

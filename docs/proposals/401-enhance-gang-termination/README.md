@@ -12,18 +12,15 @@
     - [Story 3: Per–PCSG or per–PCLQ overrides](#story-3-perpcsg-or-perpclq-overrides)
   - [Limitations/Risks &amp; Mitigations](#limitationsrisks--mitigations)
 - [Design Details](#design-details)
-  - [Background: Current gang termination](#background-current-gang-termination)
-  - [Problem: Pods stuck in termination](#problem-pods-stuck-in-termination)
-  - [Solution options](#solution-options)
-    - [Option 1: Force delete pods stuck in termination](#option-1-force-delete-pods-stuck-in-termination)
-    - [Option 2: Orphan pods stuck in termination](#option-2-orphan-pods-stuck-in-termination)
+  - [Definition: Stuck in termination](#definition-stuck-in-termination)
+  - [Stuck-termination policies](#stuck-termination-policies)
+    - [ForceDelete](#forcedelete)
+    - [Orphan](#orphan)
   - [API design](#api-design)
   - [Behavior and control flow](#behavior-and-control-flow)
   - [Monitoring](#monitoring)
   - [Test Plan](#test-plan)
-  - [Graduation Criteria](#graduation-criteria)
 - [Implementation History](#implementation-history)
-- [Alternatives](#alternatives)
 <!-- /toc -->
 
 ## Summary
@@ -32,16 +29,16 @@ Grove’s gang termination today deletes and recreates PodCliques (and their pod
 
 ## Motivation
 
-In topology-constrained workloads (e.g. MNNVL with all pods on the same rack), the following situation occurs:
+In topology-constrained workloads (e.g. MNNVL with all pods on the same rack), pods stuck in termination can cause long stalls and prevent the gang from ever recovering. A typical sequence:
 
 1. All pods of a PodClique (or PodCliqueSet replica) are required to be on the same rack (e.g. Rack A).
 2. During training, a node on Rack A fails; some pods are deleted but the kubelet on the failed node does not respond, so those pods remain in the cluster with `deletionTimestamp` set (stuck terminating).
 3. Grove creates a **replacement** pod for the one that is stuck terminating. Because of the gang topology constraint (all pods on the same rack), the replacement pod must be scheduled to **Rack A**—the same rack as the remaining running pods.
 4. Rack A has insufficient allocatable resources (e.g. due to the faulty node), so the scheduler cannot place the replacement pod there. The replacement pod stays **Pending**.
-5. MinAvailable remains breached (one pod stuck terminating, one Pending). Gang termination will only be triggered after **TerminationDelay** expires. Until then, the gang is stuck: the replacement pod stays Pending and the gang cannot become healthy.
-6. Only **after** TerminationDelay does gang termination run (issue delete for all PodCliques and pods for that replica). **If** all pods actually disappear from the API (e.g. no finalizers on the pod, kubelet completes deletion), the PodClique finalizer is removed and the PCLQs are gone; the controller then creates new PCLQs and new pods, which can be placed on a different rack (e.g. Rack B). **But** if a pod is stuck in the API (e.g. the pod has finalizers or the kubelet never completes termination), the PodClique **cannot** be fully deleted (its finalizer is only removed when no managed pods remain), so the PCLQs stay in a “deleting” state and **new PCLQs are never created**—the gang never recovers. The issue is thus both the long wait until TerminationDelay and, when pods are stuck, the **blocking of PCLQ deletion** by the finalizer.
+5. MinAvailable remains breached (one pod stuck terminating, one Pending). Gang termination is only triggered after **TerminationDelay** expires. Until then, the gang is stuck: the replacement pod stays Pending and the gang cannot become healthy.
+6. **After** TerminationDelay, gang termination runs (issue delete for all PodCliques and pods for that replica). **If** all pods actually disappear from the API (e.g. no finalizers on the pod, kubelet completes deletion), the PodClique finalizer is removed and the PCLQs are gone; the controller then creates new PCLQs and new pods, which can be placed on a different rack (e.g. Rack B). **But** if a pod is stuck in the API (e.g. the pod has finalizers or the kubelet never completes termination), the PodClique **cannot** be fully deleted (its finalizer is only removed when no managed pods remain), so the PCLQs stay in a “deleting” state and **new PCLQs are never created**—the gang never recovers.
 
-When **no** pod is stuck, gang termination can eventually resolve the situation (after TerminationDelay): PCLQs and pods are deleted, then new PCLQs and pods are created and can be placed on another rack (e.g. Rack B). But when **a pod is stuck** in the API (e.g. stuck terminating, or the pod has finalizers), the PodClique **cannot** be fully deleted (its finalizer is only removed when no managed pods remain), so gang termination **does not** resolve the situation—the PCLQs stay in a “deleting” state and new PCLQs are never created; the gang never recovers. There is also a **long wait** until TerminationDelay even when pods are not stuck. To recover, we must special-case pods stuck in termination: either **force delete** them (remove from the API so the PCLQ finalizer can be removed and the PCLQ deleted, and replacement pods can be created), or **orphan** them—e.g. treat them as no longer “existing” for cleanup verification so the PCLQ finalizer can be removed and the PCLQ deleted; Grove stops managing the orphaned pods and they remain in the cluster for the admin to handle.
+The problem is thus twofold: the **long wait** until TerminationDelay, and when pods are stuck, the **blocking of PCLQ deletion** by the finalizer. To recover, we must special-case pods stuck in termination: **force delete** them (remove from the API so the PCLQ can be deleted and replacement pods created) or **orphan** them (treat as no longer managed so the PCLQ finalizer can be removed; Grove stops managing the pods and they remain in the cluster for the admin to handle).
 
 ### Goals
 
@@ -70,7 +67,7 @@ Exactly one of the two policies can be selected per PodCliqueSet (or globally). 
 
 #### Story 1: Recover from pods stuck terminating on failed nodes
 
-As a user running a topology-constrained workload (e.g. all pods on the same rack), when a node fails and some pods remain stuck in termination because the kubelet does not respond, I want Grove to either remove those pods (force delete) or orphan them (leave them for admin to handle) after a configurable time, so that replacement pods can be created and scheduled and the gang can recover instead of remaining stuck.
+As a user running a topology-constrained workload (e.g. all pods on the same rack), when a node fails and some pods remain stuck in termination because the kubelet does not respond, I want Grove to either remove those pods (force delete) or orphan them (leave them for the admin to handle) after a configurable time, so that replacement pods can be created and scheduled and the gang can recover instead of remaining stuck.
 
 #### Story 2: Configurable policy for stuck-terminating pods
 
@@ -84,44 +81,34 @@ As a user with a PodCliqueSet that has multiple scaling groups or clique roles, 
 
 | Risk / Limitation | Mitigation |
 |-------------------|------------|
-| Force delete can abort in-flight work | Make the stuck-termination timeout long enough (e.g. ≥ typical graceful shutdown). Document that force delete is for stuck pods only; normal termination is unchanged. |
-| Orphan: pods no longer managed by Grove, left for admin | Document that with **Orphan**, Grove stops managing those pods (they no longer belong to Grove); they remain in the cluster and the admin is responsible for cleaning them up. Emit events/conditions so operators can see which pods were orphaned. |
-| Misconfiguration (too short timeout) causes premature force delete | Validation or defaults that discourage timeouts shorter than a minimum (e.g. 5 minutes). Clear documentation. |
+| Force delete can abort in-flight work; a too short timeout causes premature force delete | Make the stuck-termination timeout long enough (e.g. ≥ typical graceful shutdown). Use validation or defaults to discourage timeouts shorter than a minimum (e.g. 5 minutes). Document that force delete is for stuck pods only; normal termination is unchanged. |
+| Force delete removes the pod from the API; users lose the ability to preserve the scene (pod object, status, etc.) for debugging (logs may still exist elsewhere, e.g. on PV) | Document that with **ForceDelete** the pod is gone and the in-cluster "scene" is no longer available for inspection. Recommend **Orphan** when preserving the stuck pod for debugging (e.g. inspect status, exec, or collect from PV) is important. |
+| Orphan: pods no longer managed by Grove and can accumulate in the cluster; the admin is responsible for timely cleanup | Document that with **Orphan**, Grove stops managing those pods (they remain in the cluster and are not auto-removed; they can accumulate e.g. after repeated node failures). Emit events/conditions and optional metrics (e.g. orphan count) so operators can see and monitor orphaned pods. Recommend runbooks or automation for timely cleanup. |
 
 ## Design Details
 
-### Background: Current gang termination
+### Definition: Stuck in termination
 
-- **MinAvailableBreached**: For each PodClique, status is updated from the set of pods that belong to it. Terminating pods (with `deletionTimestamp` set) are categorized separately and are not counted as ready; they are also excluded from the “replicas” count. So when a pod is stuck terminating, MinAvailable can be breached because that pod is no longer counted as available.
-- **Gang termination**: If MinAvailable remains breached for longer than **TerminationDelay** (on PodCliqueSet template), the PodCliqueSet controller triggers gang termination for the affected **replica**: it issues delete for **all PodCliques (PCLQs)** for that replica index. Each PodClique has a **finalizer** (`grove.io/podclique.grove.io`). The PodClique controller’s delete flow: (1) delete managed resources (pods), (2) **verify no resources await cleanup**—each operator (e.g. pod) reports existing resource names; if any pod belonging to that PCLQ still exists in the API, this step fails and the controller requeues without removing the finalizer, (3) remove the PCLQ finalizer only when no managed resources remain. So **if a pod is stuck in the API** (e.g. stuck terminating, or has finalizers so it never disappears), **the PCLQ cannot be fully deleted**: the PCLQ remains with `deletionTimestamp` set and the finalizer still present, because `VerifyNoResourceAwaitsCleanup` never passes.
-- **After gang termination (when no pod is stuck)**: Only when all pods are gone from the API does the PCLQ finalizer get removed and the PCLQ disappear. Then the PodCliqueSet controller sees that the replica has no PCLQs and **creates new PCLQs** (and PodGangs, etc.) and new pods, which can be scheduled elsewhere (e.g. Rack B). **When a pod is stuck** (e.g. finalizer on the pod or kubelet not responding), the PCLQ never leaves the API, so the replica still “has” PCLQs (stuck in deletion) and **new PCLQs are not created**—the gang cannot recover. This is why this GREP proposes force delete (remove the pod from the API, e.g. clear pod finalizers) or orphan (e.g. treat stuck-terminating pods as no longer “existing” for the purpose of cleanup verification so the PCLQ finalizer can be removed and the PCLQ can be deleted; the stuck pod then remains as an orphan for the admin to handle).
-
-### Problem: Pods stuck in termination
-
-**Note on Kubernetes pod state**: The Kubernetes Pod API does not define a dedicated “Terminating” value for `status.phase` (the phases are Pending, Running, Succeeded, Failed, Unknown). A pod is conventionally said to be in a **terminating** state when it has been marked for deletion: `metadata.deletionTimestamp` is set. The pod remains in the API (often still with `phase: Running`) until the kubelet completes deletion. Tools like `kubectl get pods` may show “Terminating” in the status column by deriving it from `deletionTimestamp`. In this GREP, “terminating” and “stuck in termination” refer to pods that have `deletionTimestamp` set and have not yet been removed from the API server.
-
-A pod is **stuck in termination** if:
-
-- It has `deletionTimestamp` set, and
-- The time since `deletionTimestamp` is greater than the configured **stuck termination timeout**.
+In this GREP, a pod is **stuck in termination** if it has `deletionTimestamp` set and the time since `deletionTimestamp` exceeds the configured **stuck termination timeout**. (Kubernetes does not define a "Terminating" phase; the pod remains in the API until the kubelet completes deletion.)
 
 Such pods are still present in the API server but are not making progress toward termination (e.g. because the kubelet on the node is down or not responding).
 
-### Solution options
+### Stuck-termination policies
 
-#### Option 1: Force delete pods stuck in termination
+Exactly one of two policies can be selected (per PodCliqueSet or globally): **ForceDelete** or **Orphan**.
 
-- **Behavior**: When reconciling a PodClique (or the pod set for a replica), the controller identifies pods that are stuck terminating. For each such pod, it performs a **delete with `GracePeriodSeconds=0`**. If the pod has finalizers that block deletion, the controller may optionally clear them.
+#### ForceDelete
+
+- **Behavior**: When reconciling a PodClique (or the pod set for a replica), the controller identifies pods that are stuck terminating. For each such pod, it performs a **delete with `GracePeriodSeconds=0`**. If the pod has finalizers that block deletion, the controller clear them.
 - **Effect**: The API server removes the pod object. The controller can then create a replacement pod; the scheduler can place it without being blocked by the old pod’s presence on the node.
 - **Use case**: Operators who want stuck pods removed from the cluster so that replacement pods can be created and scheduled cleanly.
 
-#### Option 2: Orphan pods stuck in termination
+#### Orphan
 
 - **Behavior**: Grove **stops managing** the stuck-terminating pods—they **no longer belong to Grove**. When computing status and desired pod count, the controller excludes these pods from the “existing pods” set and creates replacement pods so the gang can recover. Grove does not delete the orphaned pods; they remain in the cluster.
 - **Effect**: The gang recovers (replacement pods are created and scheduled). The orphaned pods stay in the cluster with `deletionTimestamp` set; Grove will not manage them again. The **admin** is responsible for handling them (e.g. manual `kubectl delete`, node drain, or external cleanup scripts).
-- **Use case**: Operators who prefer not to force-delete (e.g. due to finalizers or policy) and who accept that once orphaned, those pods are no longer under Grove’s management.
+- **Use case**: Operators who prefer not to force-delete (e.g. due to finalizers) and who accept that once orphaned, those pods are no longer under Grove’s management.
 
-Only one policy (force delete or orphan) is applied; the configuration specifies which.
 
 ### API design
 
@@ -193,7 +180,8 @@ This allows, for example: PCS default Orphan 10m; one PCSG overrides to ForceDel
    - **Orphan**: When computing status and desired pod count, exclude stuck-terminating pods from the “existing pods” set. When syncing pods, create replacements as if those pods do not exist. Grove does not delete the stuck pods; they remain as orphans for the admin to handle.
 
 2. **Status computation (PodClique)**:
-   - For **Orphan** policy: in `reconcileStatus` (and any shared helpers that categorize pods), exclude stuck-terminating pods before computing Replicas, ReadyReplicas, ScheduledReplicas, and MinAvailableBreached. Then stuck pods do not contribute to counts and do not delay MinAvailableBreached.
+   - **ForceDelete**: Once a stuck-terminating pod is deleted, it is no longer in the API and thus not included in the pod set used for status; no special exclusion logic is needed.
+   - **Orphan**: In `reconcileStatus` (and any shared helpers that categorize pods), exclude stuck-terminating pods before computing Replicas, ReadyReplicas, ScheduledReplicas, and MinAvailableBreached, so they do not contribute to counts and do not delay MinAvailableBreached.
 
 3. **Gang termination (PodCliqueSet replica / PCSG)**:
    - No change to when gang termination is triggered (still based on MinAvailableBreached and TerminationDelay). With **Orphan**, MinAvailableBreached may clear earlier because stuck-terminating pods are not counted, so the replica may recover without gang termination. With **ForceDelete**, stuck pods are removed so that after gang termination, replacement pods can be created and scheduled.
@@ -202,31 +190,26 @@ This allows, for example: PCS default Orphan 10m; one PCSG overrides to ForceDel
 
 ### Monitoring
 
-- **Events**: Emit a warning (or normal) event on the PodClique (or PodCliqueSet) when a pod is force-deleted or first orphaned due to stuck termination (e.g. “Pod xyz stuck terminating for > timeout; force deleted” or “Pod xyz stuck terminating; orphaned for admin to handle”).
-- **Conditions (optional)**: A condition on PodClique (e.g. `StuckTerminatingPods`) with reason/message listing which pods are currently stuck or orphaned, so operators can see the state without scanning events.
-- **Metrics (optional)**: Counter or gauge for “pods force-deleted due to stuck termination” and “pods orphaned due to stuck termination” per PodCliqueSet or namespace.
+- **Events**: Emit a warning (or normal) event on the PodClique (or PodCliqueSet) when a pod is force-deleted or first orphaned due to stuck termination (e.g. “Pod xyz stuck terminating for > timeout; force deleted” or “Pod xyz stuck terminating; orphaned for the admin to handle”).
+- **Conditions (optional)**: A `metav1.Condition` on PodClique status to expose pods that are stuck terminating or orphaned:
+
+  Condition type: `StuckTerminatingPods`
+
+  | Status  | Reason              | Description |
+  | -------- | ------------------- | ----------- |
+  | `True`  | `PodsStuckOrOrphaned` | One or more pods are stuck terminating (and will be force-deleted or orphaned per policy). Message lists affected pod names (e.g. `namespace/name`). |
+  | `False` | `NoStuckTerminatingPods` | No pods in this PodClique are currently stuck terminating or orphaned. |
 
 ### Test Plan
 
 - **Unit tests**:
   - Classification: pods with `deletionTimestamp` older than timeout are classified as stuck; within timeout they are not.
   - ForceDelete: when policy is ForceDelete, controller issues delete with grace period 0 for stuck pods; replacement pod is created after pod is removed.
-  - Orphan: when policy is Orphan, stuck-terminating pods are excluded from status counts and from “existing pods” in sync; replacement pods are created; stuck pods remain in the cluster as orphans for admin to handle.
+  - Orphan: when policy is Orphan, stuck-terminating pods are excluded from status counts and from “existing pods” in sync; replacement pods are created; stuck pods remain in the cluster as orphans for the admin to handle.
   - Default/disabled: when StuckTermination is nil or timeout is 0, no force delete and no exclude logic; behavior matches current code.
 - **E2E (optional)**: Simulate a pod stuck terminating (e.g. mock or node cordon/drain scenario where kubelet stops responding) and assert that with ForceDelete the pod is removed and replacement runs, or with Orphan the gang recovers (replacement pod created and scheduled) and the stuck pod remains as an orphan.
-
-### Graduation Criteria
-
-- **Alpha**: API (StuckTerminationConfig) added and wired; ForceDelete and Orphan implemented in PodClique controller; unit tests; feature gated or behind a default-off flag if desired.
-- **Beta**: Defaults and validation stable; documentation and events; E2E coverage where feasible; at least one real-environment validation (e.g. MNNVL rack scenario).
-- **GA**: No breaking changes to default behavior; production use; clear migration path if defaults change.
 
 ## Implementation History
 
 - **2026-03-02**: Initial GREP created, tracking issue: [ai-dynamo/grove#401](https://github.com/ai-dynamo/grove/issues/401).
 
-## Alternatives
-
-- **Only force delete**: Simpler API but does not satisfy operators who do not want to force-delete (e.g. due to finalizers or policy). Supporting both ForceDelete and Orphan gives flexibility: admins who prefer to handle stuck pods themselves can use Orphan.
-- **Node-level eviction**: Relying on node failure detection and eviction is out of scope and may be slower; this GREP focuses on pod-level “stuck terminating” only.
-- **Global only (OperatorConfiguration)**: Per-PodCliqueSet configuration allows different workloads to use different timeouts and policies (e.g. short timeout for batch, longer for stateful) and is more flexible than a single global default.

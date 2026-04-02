@@ -49,10 +49,10 @@ func TestInitialize(t *testing.T) {
 			expectedName:  "default-scheduler", // kube backend's Name() is the pod-facing name
 		},
 		{
-			name:          "unsupported scheduler",
-			schedulerName: "volcano",
-			wantErr:       true,
-			errContains:   "not supported",
+			name:          "volcano scheduler initialization",
+			schedulerName: configv1alpha1.SchedulerNameVolcano,
+			wantErr:       false,
+			expectedName:  "volcano",
 		},
 	}
 

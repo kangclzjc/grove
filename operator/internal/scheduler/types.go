@@ -54,3 +54,11 @@ type Backend interface {
 	// ValidatePodCliqueSet runs scheduler-specific validations on the PodCliqueSet (e.g. TAS required but not supported).
 	ValidatePodCliqueSet(ctx context.Context, pcs *grovecorev1alpha1.PodCliqueSet) error
 }
+
+// Registry provides access to initialized scheduler backends by name.
+type Registry interface {
+	// Get returns the backend for the given name. Empty string returns the default backend.
+	Get(name string) Backend
+	// GetDefault returns the backend designated as default.
+	GetDefault() Backend
+}

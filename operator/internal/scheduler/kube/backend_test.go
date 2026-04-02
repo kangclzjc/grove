@@ -36,5 +36,5 @@ func TestBackend_PreparePod(t *testing.T) {
 
 	b.PreparePod(pod)
 
-	assert.Equal(t, PodSchedulerName, pod.Spec.SchedulerName)
+	assert.Equal(t, string(configv1alpha1.SchedulerNameKube), pod.Spec.SchedulerName)
 }

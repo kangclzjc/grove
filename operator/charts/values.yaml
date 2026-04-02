@@ -94,6 +94,7 @@ config:
     profiles:
       - name: kube-scheduler
       - name: kai-scheduler
+      - name: volcano
   logLevel: info
   logFormat: json
   topologyAwareScheduling:

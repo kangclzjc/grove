@@ -328,13 +328,24 @@ func TestValidateSchedulerConfiguration(t *testing.T) {
 			name: "invalid: unsupported profile name",
 			scheduler: &configv1alpha1.SchedulerConfiguration{
 				Profiles: []configv1alpha1.SchedulerProfile{
-					{Name: configv1alpha1.SchedulerName("volcano")},
+					{Name: configv1alpha1.SchedulerName("unknown-scheduler")},
 				},
-				DefaultProfileName: "volcano",
+				DefaultProfileName: "unknown-scheduler",
 			},
 			expectErrors:   2,
 			expectedFields: []string{"scheduler.profiles[0].name", "scheduler.defaultProfileName"},
 			expectedTypes:  []field.ErrorType{field.ErrorTypeNotSupported, field.ErrorTypeInvalid},
+		},
+		// volcano profile is valid
+		{
+			name: "valid: volcano profile",
+			scheduler: &configv1alpha1.SchedulerConfiguration{
+				Profiles: []configv1alpha1.SchedulerProfile{
+					{Name: configv1alpha1.SchedulerNameVolcano},
+				},
+				DefaultProfileName: string(configv1alpha1.SchedulerNameVolcano),
+			},
+			expectErrors: 0,
 		},
 		// duplicate profile names
 		{

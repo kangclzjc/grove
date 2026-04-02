@@ -1,0 +1,50 @@
+# Volcano gang scheduling example (no topology constraints)
+# Uses volcano backend for gang scheduling across two PodCliques:
+#   - prefill: 2 replicas (minAvailable=2)
+#   - decode:  2 replicas (minAvailable=2)
+# Volcano will create a PodGroup with minMember=4 (sum of MinReplicas).
+# All 4 pods must be schedulable together, or none will run.
+---
+apiVersion: grove.io/v1alpha1
+kind: PodCliqueSet
+metadata:
+  name: volcano-basic
+  namespace: default
+spec:
+  replicas: 1
+  template:
+    cliques:
+      - name: prefill
+        spec:
+          roleName: prefill
+          replicas: 2
+          minAvailable: 2
+          podSpec:
+            schedulerName: volcano
+            terminationGracePeriodSeconds: 5
+            containers:
+              - name: prefill
+                image: busybox:latest
+                imagePullPolicy: IfNotPresent
+                command: ["sleep", "infinity"]
+                resources:
+                  requests:
+                    memory: 20Mi
+                    cpu: "10m"
+      - name: decode
+        spec:
+          roleName: decode
+          replicas: 2
+          minAvailable: 2
+          podSpec:
+            schedulerName: volcano
+            terminationGracePeriodSeconds: 5
+            containers:
+              - name: decode
+                image: busybox:latest
+                imagePullPolicy: IfNotPresent
+                command: ["sleep", "infinity"]
+                resources:
+                  requests:
+                    memory: 20Mi
+                    cpu: "10m"

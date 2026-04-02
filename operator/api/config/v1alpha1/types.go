@@ -60,11 +60,13 @@ const (
 	SchedulerNameKai SchedulerName = "kai-scheduler"
 	// SchedulerNameKube is the profile name for the Kubernetes default scheduler in OperatorConfiguration.
 	SchedulerNameKube SchedulerName = "kube-scheduler"
+	// SchedulerNameVolcano is the Volcano scheduler backend.
+	SchedulerNameVolcano SchedulerName = "volcano"
 )
 
 var (
 	// SupportedSchedulerNames is the list of profile names allowed in scheduler.profiles[].name.
-	SupportedSchedulerNames = []SchedulerName{SchedulerNameKai, SchedulerNameKube}
+	SupportedSchedulerNames = []SchedulerName{SchedulerNameKai, SchedulerNameKube, SchedulerNameVolcano}
 )
 
 // SchedulerConfiguration configures scheduler profiles and which is the default.
@@ -81,10 +83,10 @@ type SchedulerConfiguration struct {
 
 // SchedulerProfile defines a scheduler backend profile with optional backend-specific config.
 type SchedulerProfile struct {
-	// Name is the scheduler profile name. Valid values: "kube-scheduler", "kai-scheduler".
+	// Name is the scheduler profile name. Valid values: "kube-scheduler", "kai-scheduler", "volcano".
 	// For the Kubernetes default scheduler use "kube-scheduler"; Pod.Spec.SchedulerName will be set to "default-scheduler".
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=kai-scheduler;kube-scheduler
+	// +kubebuilder:validation:Enum=kai-scheduler;kube-scheduler;volcano
 	Name SchedulerName `json:"name"`
 
 	// Config holds backend-specific options. The operator unmarshals it into the config type for this backend (see backend config types).
@@ -95,6 +97,22 @@ type SchedulerProfile struct {
 // KaiSchedulerConfiguration defines the configuration for the kai-scheduler backend.
 type KaiSchedulerConfiguration struct {
 	// Reserved for future kai-scheduler-specific options.
+}
+
+// VolcanoSchedulerConfiguration defines the configuration for the volcano scheduler backend.
+type VolcanoSchedulerConfiguration struct {
+	// Queue is the name of the Volcano Queue to which PodGroups will be submitted.
+	// Defaults to "default" if not specified.
+	// +optional
+	Queue string `json:"queue,omitempty"`
+	// TopologyKeyToTier maps node label keys (as stored in ClusterTopology levels) to Volcano HyperNode
+	// tier numbers. Required for topology-aware scheduling with Volcano.
+	// The tier numbers must match those assigned to HyperNode CRs by the cluster admin.
+	// Example: {"kubernetes.io/hostname": 1, "topology.kubernetes.io/rack": 2}
+	// If a PodGang has topology constraints but the relevant key is not in this map, the NetworkTopology
+	// field will not be set on the PodGroup and plain gang scheduling will be used.
+	// +optional
+	TopologyKeyToTier map[string]int `json:"topologyKeyToTier,omitempty"`
 }
 
 // KubeSchedulerConfig holds the configuration for the default scheduler.

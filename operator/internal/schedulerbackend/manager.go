@@ -22,6 +22,7 @@ import (
 	configv1alpha1 "github.com/ai-dynamo/grove/operator/api/config/v1alpha1"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kaischeduler"
 	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/kube"
+	"github.com/ai-dynamo/grove/operator/internal/schedulerbackend/volcano"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -32,6 +33,7 @@ import (
 var (
 	_ SchedBackend = (*kaischeduler.Backend)(nil)
 	_ SchedBackend = (*kube.Backend)(nil)
+	_ SchedBackend = (*volcano.Backend)(nil)
 )
 
 // newBackendForProfile creates and initializes a SchedBackend for the given profile.
@@ -46,6 +48,12 @@ func newBackendForProfile(cl client.Client, scheme *runtime.Scheme, rec record.E
 		return b, nil
 	case configv1alpha1.SchedulerNameKai:
 		b := kaischeduler.New(cl, scheme, rec, p)
+		if err := b.Init(); err != nil {
+			return nil, err
+		}
+		return b, nil
+	case configv1alpha1.SchedulerNameVolcano:
+		b := volcano.New(cl, scheme, rec, p)
 		if err := b.Init(); err != nil {
 			return nil, err
 		}

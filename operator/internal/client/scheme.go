@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
+	volcanoschedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 )
 
 // Scheme is the kubernetes runtime scheme
@@ -38,6 +39,7 @@ func init() {
 		schedv1alpha1.AddToScheme,
 		kaitopologyv1alpha1.AddToScheme,
 		k8sscheme.AddToScheme,
+		volcanoschedulingv1beta1.AddToScheme,
 	)
 	utilruntime.Must(metav1.AddMetaToScheme(Scheme))
 	utilruntime.Must(localSchemeBuilder.AddToScheme(Scheme))

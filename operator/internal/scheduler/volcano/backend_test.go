@@ -172,6 +172,7 @@ func TestBackend_SyncPodGang_SubGroupPolicy(t *testing.T) {
 	assert.Equal(t, int32(1), *workers.MinSubGroups)
 	require.NotNil(t, workers.LabelSelector)
 	assert.Equal(t, "workers", workers.LabelSelector.MatchLabels[apicommon.LabelPodClique])
+	assert.Equal(t, []string{apicommon.LabelPodClique}, workers.MatchLabelKeys)
 	assert.Nil(t, workers.NetworkTopology)
 
 	ps := got.Spec.SubGroupPolicy[1]
@@ -179,6 +180,7 @@ func TestBackend_SyncPodGang_SubGroupPolicy(t *testing.T) {
 	assert.Equal(t, int32(2), *ps.SubGroupSize)
 	assert.Equal(t, int32(1), *ps.MinSubGroups)
 	assert.Equal(t, "ps", ps.LabelSelector.MatchLabels[apicommon.LabelPodClique])
+	assert.Equal(t, []string{apicommon.LabelPodClique}, ps.MatchLabelKeys)
 }
 
 // TestBackend_SyncPodGang_SubGroupPolicy_SkipsZeroMinReplicas verifies that PodGroups
@@ -198,6 +200,7 @@ func TestBackend_SyncPodGang_SubGroupPolicy_SkipsZeroMinReplicas(t *testing.T) {
 	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: "my-gang", Namespace: "default"}, got))
 	require.Len(t, got.Spec.SubGroupPolicy, 1)
 	assert.Equal(t, "valid", got.Spec.SubGroupPolicy[0].Name)
+	assert.Equal(t, []string{apicommon.LabelPodClique}, got.Spec.SubGroupPolicy[0].MatchLabelKeys)
 }
 
 // TestBackend_SyncPodGang_SubGroupPolicy_WithPerGroupTopology verifies that per-PodGroup
@@ -264,6 +267,9 @@ func TestBackend_SyncPodGang_SubGroupPolicy_WithPerGroupTopology(t *testing.T) {
 	require.NotNil(t, psnt)
 	assert.Equal(t, volcanoschedulingv1beta1.SoftNetworkTopologyMode, psnt.Mode)
 	assert.Equal(t, 2, *psnt.HighestTierAllowed)
+
+	assert.Equal(t, []string{apicommon.LabelPodClique}, got.Spec.SubGroupPolicy[0].MatchLabelKeys)
+	assert.Equal(t, []string{apicommon.LabelPodClique}, got.Spec.SubGroupPolicy[1].MatchLabelKeys)
 }
 
 // ----------------------------- Top-level topology ----------------------------

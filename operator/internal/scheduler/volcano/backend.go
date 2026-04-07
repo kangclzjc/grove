@@ -21,9 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	apicommon "github.com/ai-dynamo/grove/operator/api/common"
 	configv1alpha1 "github.com/ai-dynamo/grove/operator/api/config/v1alpha1"
 	grovecorev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
-	apicommon "github.com/ai-dynamo/grove/operator/api/common"
 	"github.com/ai-dynamo/grove/operator/internal/scheduler"
 
 	groveschedulerv1alpha1 "github.com/ai-dynamo/grove/scheduler/api/core/v1alpha1"
@@ -164,6 +164,10 @@ func (b *Backend) ValidatePodCliqueSet(_ context.Context, _ *grovecorev1alpha1.P
 // buildSubGroupPolicy converts Grove PodGroups into Volcano SubGroupPolicy entries.
 // Each Grove PodGroup (backed by a PodClique) becomes one SubGroupPolicySpec:
 //   - LabelSelector selects pods via the grove.io/podclique label (= PodGroup.Name = pclqFQN)
+//   - MatchLabelKeys must include at least one key so Volcano (v1.14+) assigns pods to
+//     real subJobs: getOrCreateSubJob only runs when getSubJobMatchValues returns a non-empty
+//     slice; otherwise every task falls into the default subJob, CheckSubJobValid fails, and
+//     allocate skips the job entirely.
 //   - SubGroupSize = PodGroup.MinReplicas (minimum pods that must be co-scheduled)
 //   - MinSubGroups = 1 (at least one group of MinReplicas must be satisfiable)
 //   - NetworkTopology from PodGroup.TopologyConstraint (per-PodClique topology)
@@ -187,6 +191,7 @@ func buildSubGroupPolicy(podGroups []groveschedulerv1alpha1.PodGroup, keyToTier 
 					apicommon.LabelPodClique: pg.Name,
 				},
 			},
+			MatchLabelKeys:  []string{apicommon.LabelPodClique},
 			SubGroupSize:    ptr.To(pg.MinReplicas),
 			MinSubGroups:    ptr.To(int32(1)),
 			NetworkTopology: nt,

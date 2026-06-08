@@ -51,6 +51,11 @@ const (
 
 // RegisterWithManager registers the PodClique controller with the given controller manager.
 func (r *Reconciler) RegisterWithManager(mgr ctrl.Manager) error {
+	// Register the Pod -> controller UID field index that GetPCLQPods uses to list a
+	// PodClique's Pods via an indexed cache lookup instead of a full-namespace label scan.
+	if err := componentutils.RegisterPodControllerUIDIndex(context.Background(), mgr.GetFieldIndexer()); err != nil {
+		return err
+	}
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
 		WithOptions(controller.Options{

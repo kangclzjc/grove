@@ -85,6 +85,7 @@ func TestGetPCLQPods(t *testing.T) {
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
+			WithIndex(&corev1.Pod{}, podControllerUIDIndexField, indexPodByControllerUID).
 			WithObjects(ownedPod, notOwnedPod).
 			Build()
 
@@ -107,6 +108,7 @@ func TestGetPCLQPods(t *testing.T) {
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
+			WithIndex(&corev1.Pod{}, podControllerUIDIndexField, indexPodByControllerUID).
 			Build()
 
 		pods, err := GetPCLQPods(context.Background(), cl, "test-pcs", pclq)
@@ -152,6 +154,7 @@ func TestGetPCLQPods(t *testing.T) {
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
+			WithIndex(&corev1.Pod{}, podControllerUIDIndexField, indexPodByControllerUID).
 			WithObjects(pods[0], pods[1], pods[2]).
 			Build()
 
@@ -159,6 +162,68 @@ func TestGetPCLQPods(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Len(t, result, 3)
+	})
+
+	// Selection is by controller ownership (the indexed owner-reference UID), not by the
+	// PodClique label: a Pod controlled by the PodClique is returned even without the label,
+	// and a Pod that merely carries the label but is controlled by a different owner is not.
+	t.Run("selects by controller ownership not label", func(t *testing.T) {
+		pclq := &grovecorev1alpha1.PodClique{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pclq",
+				Namespace: "default",
+				UID:       "pclq-uid-123",
+			},
+		}
+
+		// Owned by the PodClique but missing the PodClique label.
+		ownedNoLabel := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "owned-no-label",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "grove.ai-dynamo.io/v1alpha1",
+						Kind:       "PodClique",
+						Name:       "test-pclq",
+						UID:        "pclq-uid-123",
+						Controller: ptr.To(true),
+					},
+				},
+			},
+		}
+
+		// Carries the PodClique label but is controlled by a different owner UID.
+		labelledOtherOwner := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "labelled-other-owner",
+				Namespace: "default",
+				Labels: map[string]string{
+					apicommon.LabelPodClique: "test-pclq",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "grove.ai-dynamo.io/v1alpha1",
+						Kind:       "PodClique",
+						Name:       "test-pclq",
+						UID:        "some-other-uid",
+						Controller: ptr.To(true),
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithIndex(&corev1.Pod{}, podControllerUIDIndexField, indexPodByControllerUID).
+			WithObjects(ownedNoLabel, labelledOtherOwner).
+			Build()
+
+		pods, err := GetPCLQPods(context.Background(), cl, "test-pcs", pclq)
+
+		require.NoError(t, err)
+		assert.Len(t, pods, 1)
+		assert.Equal(t, "owned-no-label", pods[0].Name)
 	})
 }
 

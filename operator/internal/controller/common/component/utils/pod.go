@@ -19,7 +19,6 @@ package utils
 import (
 	"context"
 
-	apicommon "github.com/ai-dynamo/grove/operator/api/common"
 	grovecorev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 
 	"github.com/samber/lo"
@@ -48,11 +47,45 @@ func WithPCLQPodsCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, pclqPodsCacheKey{}, &pclqPodsCache{byUID: make(map[types.UID][]*corev1.Pod, 1)})
 }
 
-// GetPCLQPods lists all Pods that belong to a PodClique.
-// The selector uses only LabelPodClique because the PodClique name is unique across the
-// cluster; filtering on the parent managed-by/part-of labels would add two more per-pod
-// labels.Set.Lookup calls per match with no correctness benefit. Ownership is still
-// validated by IsControlledBy below.
+// podControllerUIDIndexField is the name of the field index registered on Pods that maps a
+// Pod to the UID of its controlling owner (the owner reference with Controller=true). It is
+// a synthetic index name, not a real field path; the only requirement is that it match the
+// key passed to client.MatchingFields in GetPCLQPods.
+const podControllerUIDIndexField = ".metadata.controller.uid"
+
+// indexPodByControllerUID extracts the controlling owner UID from a Pod for the
+// podControllerUIDIndexField index. Pods without a controller owner reference are not
+// indexed. For grove-managed Pods the controller is always the owning PodClique, so this
+// index maps a Pod to its PodClique's UID.
+func indexPodByControllerUID(obj client.Object) []string {
+	controllerRef := metav1.GetControllerOf(obj)
+	if controllerRef == nil {
+		return nil
+	}
+	return []string{string(controllerRef.UID)}
+}
+
+// RegisterPodControllerUIDIndex registers the field index that GetPCLQPods relies on to list
+// a PodClique's Pods through the cache's indexed lookup path. It must be called once during
+// manager setup, before the cache is started (e.g. from a controller's RegisterWithManager).
+//
+// Without this index a List with a label selector cannot use an index: controller-runtime's
+// cache reader resolves InNamespace via the namespace index and then matches the selector
+// against every object in that namespace. GetPCLQPods would therefore scan every
+// grove-managed Pod in the namespace on each call, which at scale (many PodCliques sharing a
+// namespace, each reconcile listing its own Pods) is an O(pods-in-namespace) per-call cost.
+func RegisterPodControllerUIDIndex(ctx context.Context, fieldIndexer client.FieldIndexer) error {
+	return fieldIndexer.IndexField(ctx, &corev1.Pod{}, podControllerUIDIndexField, indexPodByControllerUID)
+}
+
+// GetPCLQPods lists all Pods controlled by the given PodClique.
+// It queries the podControllerUIDIndexField field index (see RegisterPodControllerUIDIndex)
+// keyed on the PodClique UID rather than using a label selector: the cache indexes fields but
+// not labels, so MatchingFields is served via ByIndex in O(pods-owned-by-this-clique) while
+// an equivalent MatchingLabels selector would scan every grove-managed Pod in the namespace.
+// Because the index is keyed on the controller owner reference UID, it captures exactly the
+// ownership relation that metav1.IsControlledBy used to verify in-memory, so no post-filter
+// is needed.
 //
 // When ctx carries a cache from WithPCLQPodsCache, the first call populates the cache and
 // subsequent calls in the same reconcile return the cached slice without hitting the
@@ -68,15 +101,13 @@ func GetPCLQPods(ctx context.Context, cl client.Client, _ string, pclq *grovecor
 	if err := cl.List(ctx,
 		podList,
 		client.InNamespace(pclq.Namespace),
-		client.MatchingLabels{apicommon.LabelPodClique: pclq.Name},
+		client.MatchingFields{podControllerUIDIndexField: string(pclq.UID)},
 	); err != nil {
 		return nil, err
 	}
-	ownedPods := make([]*corev1.Pod, 0, len(podList.Items))
-	for _, pod := range podList.Items {
-		if metav1.IsControlledBy(&pod, pclq) {
-			ownedPods = append(ownedPods, &pod)
-		}
+	ownedPods := make([]*corev1.Pod, len(podList.Items))
+	for i := range podList.Items {
+		ownedPods[i] = &podList.Items[i]
 	}
 	if cache != nil {
 		cache.byUID[pclq.UID] = ownedPods
